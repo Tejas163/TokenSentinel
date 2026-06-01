@@ -1,0 +1,52 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  rust-proxy:
+    build: ./rust-proxy
+    ports:
+      - "3000:3000"
+    depends_on:
+      - redis
+      - go-router
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - GO_ROUTER_URL=http://go-router:8080
+    restart: unless-stopped
+
+  go-router:
+    build: ./go-router
+    ports:
+      - "8080:8080"
+    depends_on:
+      - redis
+    environment:
+      - REDIS_ADDR=redis:6379
+    restart: unless-stopped
+
+  cost-dashboard:
+    build: ./cost-dashboard
+    ports:
+      - "3001:3001"
+    depends_on:
+      - redis
+    environment:
+      - REDIS_ADDR=redis:6379
+      - SQLITE_PATH=/data/cost_dashboard.db
+    volumes:
+      - cost-data:/data
+    restart: unless-stopped
+
+  erlang-monitor:
+    build: ./erlang-monitor
+    depends_on:
+      - redis
+    environment:
+      - REDIS_URL=redis://redis:6379
+    restart: unless-stopped
+
+volumes:
+  cost-data:

@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust-proxy:
+    name: Rust Proxy
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: proxyops_gateway/rust-proxy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+      - run: cargo build --verbose
+      - run: cargo test --verbose
+
+  go-router:
+    name: Go Router
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: proxyops_gateway/go-router
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - run: go build ./...
+      - run: go vet ./...
+
+  cost-dashboard:
+    name: Cost Dashboard
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: proxyops_gateway/cost-dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - run: go build ./...
+      - run: go vet ./...
+
+  docker:
+    name: Docker Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose -f proxyops_gateway/docker-compose.yml build

@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TokenSentinel Cost Dashboard</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; padding: 2rem; }
+  h1 { color: #38bdf8; margin-bottom: 1.5rem; font-size: 1.75rem; }
+  .card { background: #1e293b; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; border: 1px solid #334155; }
+  .card h2 { color: #94a3b8; font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 1rem; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+  .stat { background: #1e293b; border-radius: 8px; padding: 1.25rem; border: 1px solid #334155; }
+  .stat .value { font-size: 1.75rem; font-weight: 600; color: #f8fafc; }
+  .stat .label { font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.25rem; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; padding: 0.75rem 0.5rem; color: #64748b; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #334155; }
+  td { padding: 0.75rem 0.5rem; border-bottom: 1px solid #1e293b; }
+  tr:hover td { background: #1e293b; }
+  .period-selector { margin-bottom: 1rem; }
+  .period-selector button { background: #334155; color: #94a3b8; border: 1px solid #475569; padding: 0.5rem 1rem; cursor: pointer; font-size: 0.875rem; }
+  .period-selector button.active { background: #38bdf8; color: #0f172a; border-color: #38bdf8; font-weight: 600; }
+  .period-selector button:first-child { border-radius: 6px 0 0 6px; }
+  .period-selector button:last-child { border-radius: 0 6px 6px 0; }
+  .loading { color: #64748b; text-align: center; padding: 2rem; }
+</style>
+</head>
+<body>
+<h1>&#9632; TokenSentinel Cost Dashboard</h1>
+
+<div class="card">
+  <div class="period-selector">
+    <button onclick="setPeriod('1h')">1H</button>
+    <button onclick="setPeriod('6h')">6H</button>
+    <button onclick="setPeriod('24h')" class="active">24H</button>
+    <button onclick="setPeriod('72h')">3D</button>
+    <button onclick="setPeriod('168h')">7D</button>
+  </div>
+  <div class="stats" id="summary"></div>
+</div>
+
+<div class="card">
+  <h2>Cost by Model</h2>
+  <table><thead><tr><th>Model</th><th>Requests</th><th>Input Tokens</th><th>Output Tokens</th><th>Total Tokens</th><th>Avg Input</th><th>Avg Output</th></tr></thead><tbody id="costs"></tbody></table>
+  <div class="loading" id="loading">Loading...</div>
+</div>
+
+<script>
+let currentPeriod = '24h';
+
+async function loadSummary(period) {
+  const r = await fetch('/api/dashboard/summary?period=' + period);
+  const d = await r.json();
+  document.getElementById('summary').innerHTML = [
+    '<div class="stat"><div class="value">' + d.total_requests + '</div><div class="label">Requests</div></div>',
+    '<div class="stat"><div class="value">' + (d.total_tokens/1000).toFixed(1) + 'K</div><div class="label">Total Tokens</div></div>',
+    '<div class="stat"><div class="value">' + (d.total_input/1000).toFixed(1) + 'K</div><div class="label">Input Tokens</div></div>',
+    '<div class="stat"><div class="value">' + (d.total_output/1000).toFixed(1) + 'K</div><div class="label">Output Tokens</div></div>',
+    '<div class="stat"><div class="value">' + d.unique_models + '</div><div class="label">Models Used</div></div>',
+    '<div class="stat"><div class="value">' + d.avg_tokens_per_request.toFixed(0) + '</div><div class="label">Avg Tokens/Req</div></div>'
+  ].join('');
+}
+
+async function loadCosts(period) {
+  document.getElementById('loading').style.display = 'block';
+  const r = await fetch('/api/dashboard/costs?period=' + period);
+  const d = await r.json();
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('costs').innerHTML = d.map(function(m) {
+    return '<tr>' +
+      '<td>' + m.model + '</td>' +
+      '<td>' + m.request_count + '</td>' +
+      '<td>' + (m.total_input/1000).toFixed(1) + 'K</td>' +
+      '<td>' + (m.total_output/1000).toFixed(1) + 'K</td>' +
+      '<td><strong>' + (m.total_tokens/1000).toFixed(1) + 'K</strong></td>' +
+      '<td>' + m.avg_input.toFixed(0) + '</td>' +
+      '<td>' + m.avg_output.toFixed(0) + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
+function setPeriod(p) {
+  currentPeriod = p;
+  document.querySelectorAll('.period-selector button').forEach(function(b) {
+    b.classList.toggle('active', b.textContent.includes(p.replace('h','')));
+  });
+  loadSummary(p);
+  loadCosts(p);
+}
+
+loadSummary('24h');
+loadCosts('24h');
+</script>
+</body>
+</html>

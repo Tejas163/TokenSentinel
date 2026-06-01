@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  labels: { app: tokensentinel, component: redis }
+spec:
+  ports:
+    - port: 6379
+      targetPort: 6379
+  selector: { app: tokensentinel, component: redis }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  labels: { app: tokensentinel, component: redis }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: tokensentinel, component: redis }
+  template:
+    metadata:
+      labels: { app: tokensentinel, component: redis }
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - containerPort: 6379
+          resources:
+            requests: { cpu: "100m", memory: "64Mi" }
+            limits: { cpu: "500m", memory: "256Mi" }

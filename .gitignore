@@ -1,0 +1,30 @@
+# Rust
+target/
+**/*.rs.bk
+
+# Go
+go-router/go-router
+go-router/go-router.exe
+
+# Erlang
+erlang-monitor/_build/
+erlang-monitor/rebar.lock
+
+# Python
+evolunet_slm/__pycache__/
+evolunet_slm/*.pyc
+evolunet_slm/.venv/
+evolunet_slm/venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log
