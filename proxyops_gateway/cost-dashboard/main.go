@@ -1,16 +1,20 @@
-package main
+﻿package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"embed"
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -89,6 +93,15 @@ type CostEntry struct {
 	IngestedAt   string `json:"ingested_at"`
 }
 
+type BudgetRule struct {
+	ID         int    `json:"id"`
+	Model      string `json:"model"`
+	MaxTokens  int64  `json:"max_tokens"`
+	Period     string `json:"period"`
+	WebhookURL string `json:"webhook_url"`
+	Enabled    bool   `json:"enabled"`
+}
+
 type AnomalyEntry struct {
 	RequestID   string  `json:"request_id"`
 	Model       string  `json:"model"`
@@ -138,6 +151,7 @@ func main() {
 	go subscribeCostEvents(context.Background())
 	go dataRetention(context.Background())
 	go detectAnomalies(context.Background())
+	go checkBudgets(context.Background())
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", handleDashboardHealth)
@@ -145,6 +159,7 @@ func main() {
 	mux.HandleFunc("/api/dashboard/summary", authMiddleware(handleSummary))
 	mux.HandleFunc("/api/dashboard/anomalies", authMiddleware(handleAnomalies))
 	mux.HandleFunc("/api/dashboard/events", authMiddleware(handleSSE))
+	mux.HandleFunc("/api/admin/budget-rules", authMiddleware(handleBudgetRules))
 	mux.HandleFunc("/", authMiddleware(handleDashboard))
 
 	port := os.Getenv("PORT")
@@ -174,6 +189,17 @@ func initDB() error {
 		return err
 	}
 	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_cost_timestamp ON cost_entries(timestamp)`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS budget_rules (
+		id SERIAL PRIMARY KEY,
+		model TEXT NOT NULL,
+		max_tokens BIGINT NOT NULL,
+		period TEXT NOT NULL DEFAULT '24h',
+		webhook_url TEXT NOT NULL,
+		enabled BOOLEAN NOT NULL DEFAULT true
+	)`)
 	return err
 }
 
@@ -470,6 +496,152 @@ func handleDashboardHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"status": status})
+}
+
+var webhookClient = &http.Client{Timeout: 10 * time.Second}
+
+var (
+	lastNotified   = make(map[int]time.Time)
+	lastNotifiedMu sync.Mutex
+)
+
+func checkBudgets(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			rows, err := db.Query(`SELECT id, model, max_tokens, period, webhook_url FROM budget_rules WHERE enabled = true`)
+			if err != nil {
+				log.Printf("budget rules query failed: %v", err)
+				continue
+			}
+			for rows.Next() {
+				var r BudgetRule
+				if err := rows.Scan(&r.ID, &r.Model, &r.MaxTokens, &r.Period, &r.WebhookURL); err != nil {
+					continue
+				}
+				since, parseErr := time.ParseDuration(r.Period)
+				if parseErr != nil {
+					continue
+				}
+				sinceStr := time.Now().UTC().Add(-since).Format(time.RFC3339)
+
+				var totalTokens sql.NullInt64
+				query := `SELECT COALESCE(SUM(input_tokens + output_tokens), 0) FROM cost_entries WHERE timestamp >= $1`
+				if r.Model != "*" {
+					query += ` AND model = $2`
+				}
+				var rowErr error
+				if r.Model != "*" {
+					rowErr = db.QueryRow(query, sinceStr, r.Model).Scan(&totalTokens)
+				} else {
+					rowErr = db.QueryRow(query, sinceStr).Scan(&totalTokens)
+				}
+				if rowErr != nil {
+					continue
+				}
+
+				if totalTokens.Int64 > r.MaxTokens {
+					lastNotifiedMu.Lock()
+					last := lastNotified[r.ID]
+					notify := time.Since(last) > 30*time.Minute
+					if notify {
+						lastNotified[r.ID] = time.Now()
+					}
+					lastNotifiedMu.Unlock()
+					if !notify {
+						continue
+					}
+
+					payload, _ := json.Marshal(map[string]interface{}{
+						"rule_id":      r.ID,
+						"model":        r.Model,
+						"period":       r.Period,
+						"total_tokens": totalTokens.Int64,
+						"max_tokens":   r.MaxTokens,
+						"exceeded_by":  totalTokens.Int64 - r.MaxTokens,
+						"checked_at":   time.Now().UTC().Format(time.RFC3339),
+					})
+					resp, postErr := webhookClient.Post(r.WebhookURL, "application/json", bytes.NewReader(payload))
+					if postErr != nil {
+						log.Printf("webhook post failed for rule %d: %v", r.ID, postErr)
+						continue
+					}
+					io.Copy(io.Discard, resp.Body)
+					resp.Body.Close()
+					log.Printf("budget alert fired for rule %d -> %s", r.ID, r.WebhookURL)
+				}
+			}
+			rows.Close()
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func handleBudgetRules(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		rows, err := db.Query(`SELECT id, model, max_tokens, period, webhook_url, enabled FROM budget_rules ORDER BY id`)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+		var rules []BudgetRule
+		for rows.Next() {
+			var br BudgetRule
+			if err := rows.Scan(&br.ID, &br.Model, &br.MaxTokens, &br.Period, &br.WebhookURL, &br.Enabled); err != nil {
+				continue
+			}
+			rules = append(rules, br)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(rules)
+
+	case "POST":
+		var br BudgetRule
+		if err := json.NewDecoder(r.Body).Decode(&br); err != nil {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		if br.Model == "" || br.MaxTokens <= 0 || br.WebhookURL == "" {
+			http.Error(w, "model, max_tokens, and webhook_url required", http.StatusBadRequest)
+			return
+		}
+		if br.Period == "" {
+			br.Period = "24h"
+		}
+		err := db.QueryRow(
+			`INSERT INTO budget_rules (model, max_tokens, period, webhook_url) VALUES ($1,$2,$3,$4) RETURNING id, enabled`,
+			br.Model, br.MaxTokens, br.Period, br.WebhookURL,
+		).Scan(&br.ID, &br.Enabled)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(br)
+
+	case "DELETE":
+		idStr := r.URL.Query().Get("id")
+		id, err := strconv.Atoi(idStr)
+		if err != nil || id <= 0 {
+			http.Error(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		_, err = db.Exec(`DELETE FROM budget_rules WHERE id = $1`, id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func handleSSE(w http.ResponseWriter, r *http.Request) {
