@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>API Reference — TokenSentinel</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <h2>TokenSentinel</h2>
+      <span>Enterprise AI Gateway</span>
+    </div>
+    <nav>
+      <div class="sidebar-section">Getting Started</div>
+      <ul>
+        <li><a href="index.html">Overview</a></li>
+        <li><a href="quickstart.html">Quick Start</a></li>
+        <li><a href="architecture.html">Architecture</a></li>
+      </ul>
+      <div class="sidebar-section">Guides</div>
+      <ul>
+        <li><a href="developer-guide.html">Developer Guide</a></li>
+        <li><a href="manual.html">User Manual</a></li>
+        <li><a href="deployment.html">Deployment</a></li>
+      </ul>
+      <div class="sidebar-section">Reference</div>
+      <ul>
+        <li><a href="api-reference.html" class="active">API Reference</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <div class="page">
+      <h1>API Reference</h1>
+      <p class="subtitle">Complete reference for all TokenSentinel REST endpoints.</p>
+
+      <h2>Authentication</h2>
+      <p>All API endpoints (except the dashboard HTML page) require authentication via the <code>Authorization</code> header:</p>
+      <pre><code>Authorization: Bearer &lt;your-api-key&gt;</code></pre>
+      <p>The default development key is <code>dev-key-123</code>. Set via <code>AUTH_API_KEY</code> environment variable.</p>
+
+      <h2>Dashboard Endpoints</h2>
+      <p>Base URL: <code>http://localhost:3001</code></p>
+
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/</span></div>
+      <p>HTML cost dashboard page. Does not require authentication.</p>
+
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/dashboard/cost-summary?period=24H</span></div>
+      <p>Aggregated cost breakdown by model.</p>
+      <table>
+        <tr><th>Parameter</th><th>Type</th><th>Description</th><th>Valid Values</th></tr>
+        <tr><td><code>period</code></td><td>string</td><td>Time window for aggregation</td><td><code>1H</code>, <code>6H</code>, <code>24H</code>, <code>3D</code>, <code>7D</code></td></tr>
+      </table>
+      <pre><code>{
+  "total_cost": 1.234,
+  "total_requests": 150,
+  "total_tokens": 50000,
+  "avg_tokens_per_request": 333.3,
+  "models": [
+    {"model": "gpt-4o-mini", "cost": 0.5, "requests": 100, "tokens": 30000, "pct": 40.5}
+  ]
+}</code></pre>
+
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/dashboard/model-costs?period=24H</span></div>
+      <p>Per-model cost breakdown.</p>
+      <pre><code>[
+  {"model": "gpt-4o-mini", "cost": 0.5, "requests": 100, "input_tokens": 15000, "output_tokens": 15000}
+]</code></pre>
+
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/dashboard/events</span></div>
+      <p>Server-Sent Events stream for real-time cost and anomaly updates. The connection stays open and pushes events as they arrive.</p>
+      <pre><code>data: {"type": "cost_event", "model": "gpt-4o-mini", "cost_cents": 0.042, "timestamp": "..."}
+
+data: {"type": "anomaly", "model": "gpt-4o", "score": 4.2, "threshold": 3.0}</code></pre>
+
+      <h2>Admin Endpoints</h2>
+
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/admin/health</span></div>
+      <p>Health check. Returns <code>{"status": "ok"}</code>.</p>
+
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/admin/anomalies?limit=10</span></div>
+      <p>Recent anomaly detection events.</p>
+      <table>
+        <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+        <tr><td><code>limit</code></td><td>int</td><td>Number of events to return (default 10, max 100)</td></tr>
+      </table>
+
+      <h3>Team Management</h3>
+
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/admin/teams</span></div>
+      <p>List all teams.</p>
+
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/admin/teams</span></div>
+      <p>Create a new team.</p>
+      <pre><code>{
+  "name": "engineering",
+  "monthly_token_limit": 10000000
+}</code></pre>
+
+      <div class="endpoint"><span class="method delete">DELETE</span><span class="path">/api/admin/teams/{name}</span></div>
+      <p>Delete a team and its budget rules.</p>
+
+      <h3>Budget Status</h3>
+
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/admin/budget-status/{team_name}</span></div>
+      <p>Get current budget usage for a team.</p>
+      <pre><code>{
+  "team_name": "engineering",
+  "monthly_token_limit": 10000000,
+  "tokens_used": 4500000,
+  "usage_pct": 45.0,
+  "remaining": 5500000
+}</code></pre>
+
+      <h3>Budget Rules</h3>
+
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/admin/budget-rules</span></div>
+      <p>List all budget alert rules.</p>
+
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/admin/budget-rules</span></div>
+      <p>Create a budget alert rule.</p>
+      <pre><code>{
+  "team_name": "engineering",
+  "threshold_pct": 80,
+  "webhook_url": "https://hooks.slack.com/services/..."
+}</code></pre>
+
+      <div class="endpoint"><span class="method delete">DELETE</span><span class="path">/api/admin/budget-rules/{id}</span></div>
+      <p>Delete a budget rule by ID.</p>
+
+      <h2>Environment Variables</h2>
+      <table>
+        <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+        <tr><td><code>AUTH_API_KEY</code></td><td><code>dev-key-123</code></td><td>Shared API key for service-to-service auth</td></tr>
+        <tr><td><code>REDIS_ADDR</code></td><td><code>redis:6379</code></td><td>Redis server address</td></tr>
+        <tr><td><code>DATABASE_URL</code></td><td><code>postgres://...:5432/costdb</code></td><td>PostgreSQL connection string</td></tr>
+        <tr><td><code>GO_ROUTER_URL</code></td><td><code>http://go-router:8080</code></td><td>Upstream for rust-proxy</td></tr>
+        <tr><td><code>OPENAI_API_KEY</code></td><td>—</td><td>OpenAI API key</td></tr>
+        <tr><td><code>BUDGET_TEAM_NAME</code></td><td><code>default</code></td><td>Default team for cost attribution</td></tr>
+        <tr><td><code>DIGEST_WEBHOOK_URL</code></td><td>—</td><td>Slack/Teams webhook for cost digests</td></tr>
+        <tr><td><code>DIGEST_SCHEDULE</code></td><td><code>0 9 * * 1</code></td><td>Cron expression for digest schedule</td></tr>
+        <tr><td><code>RETENTION_DAYS</code></td><td><code>90</code></td><td>Cost data retention in days</td></tr>
+      </table>
+
+      <h2>Response Headers</h2>
+      <table>
+        <tr><th>Header</th><th>Description</th></tr>
+        <tr><td><code>X-Model-Used</code></td><td>The upstream model that served the request</td></tr>
+        <tr><td><code>X-Cost-Cents</code></td><td>Cost in USD cents</td></tr>
+        <tr><td><code>X-Request-ID</code></td><td>Unique request identifier</td></tr>
+        <tr><td><code>X-Rate-Remaining</code></td><td>Remaining requests in current rate-limit window</td></tr>
+        <tr><td><code>X-Authenticated-User</code></td><td>Authenticated user identity (internal)</td></tr>
+      </table>
+    </div>
+  </main>
+</body>
+</html>

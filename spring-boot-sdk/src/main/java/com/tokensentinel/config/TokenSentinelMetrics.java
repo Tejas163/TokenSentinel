@@ -9,9 +9,10 @@ public class TokenSentinelMetrics {
     private final Counter requestCounter;
     private final DistributionSummary tokenSummary;
     private final Timer latencyTimer;
-    private final Counter adminOpCounter;
+    private final MeterRegistry registry;
 
     public TokenSentinelMetrics(MeterRegistry registry) {
+        this.registry = registry;
         this.requestCounter = Counter.builder("tokensentinel.cost.requests")
             .description("Total cost dashboard requests")
             .register(registry);
@@ -21,10 +22,6 @@ public class TokenSentinelMetrics {
         this.latencyTimer = Timer.builder("tokensentinel.cost.latency")
             .description("Cost query latency")
             .register(registry);
-        this.adminOpCounter = Counter.builder("tokensentinel.admin.operations")
-            .description("Admin operations by type")
-            .tag("operation", "unknown")
-            .register(registry);
     }
 
     public void recordRequest() { requestCounter.increment(); }
@@ -33,6 +30,10 @@ public class TokenSentinelMetrics {
         return latencyTimer.recordCallable(callable);
     }
     public void recordAdminOp(String operation) {
-        adminOpCounter.increment();
+        Counter.builder("tokensentinel.admin.operations")
+            .description("Admin operations by type")
+            .tag("operation", operation)
+            .register(registry)
+            .increment();
     }
 }

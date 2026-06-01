@@ -171,7 +171,7 @@ func main() {
 	mux.HandleFunc("/api/admin/budget-rules", authMiddleware(handleBudgetRules))
 	mux.HandleFunc("/api/admin/teams", authMiddleware(handleTeams))
 	mux.HandleFunc("/api/budget/status", handleBudgetStatus)
-	mux.HandleFunc("/", authMiddleware(handleDashboard))
+	mux.HandleFunc("/", handleDashboard)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -303,7 +303,7 @@ func handleAnomalies(w http.ResponseWriter, r *http.Request) {
 	}
 	since, err := time.ParseDuration(period)
 	if err != nil {
-		http.Error(w, "invalid period", http.StatusBadRequest)
+		http.Error(w, "invalid period: valid values: 1h, 6h, 24h, 72h, 168h", http.StatusBadRequest)
 		return
 	}
 	sinceStr := time.Now().UTC().Add(-since).Format(time.RFC3339)
@@ -324,7 +324,8 @@ func handleAnomalies(w http.ResponseWriter, r *http.Request) {
 		sinceStr,
 	)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Printf("anomalies query error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
@@ -418,7 +419,7 @@ func handleCosts(w http.ResponseWriter, r *http.Request) {
 
 	since, err := time.ParseDuration(period)
 	if err != nil {
-		http.Error(w, "invalid period", http.StatusBadRequest)
+		http.Error(w, "invalid period: valid values: 1h, 6h, 24h, 72h, 168h", http.StatusBadRequest)
 		return
 	}
 	sinceStr := time.Now().UTC().Add(-since).Format(time.RFC3339)
@@ -431,7 +432,8 @@ func handleCosts(w http.ResponseWriter, r *http.Request) {
 		sinceStr,
 	)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Printf("costs query error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
@@ -460,7 +462,7 @@ func handleSummary(w http.ResponseWriter, r *http.Request) {
 	}
 	since, err := time.ParseDuration(period)
 	if err != nil {
-		http.Error(w, "invalid period", http.StatusBadRequest)
+		http.Error(w, "invalid period: valid values: 1h, 6h, 24h, 72h, 168h", http.StatusBadRequest)
 		return
 	}
 	sinceStr := time.Now().UTC().Add(-since).Format(time.RFC3339)
@@ -484,7 +486,8 @@ func handleSummary(w http.ResponseWriter, r *http.Request) {
 		sinceStr,
 	)
 	if err := row.Scan(&summary.TotalRequests, &summary.TotalTokens, &summary.TotalInput, &summary.TotalOutput, &summary.UniqueModels); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Printf("summary query error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	if summary.TotalRequests > 0 {
@@ -618,7 +621,8 @@ func handleBudgetRules(w http.ResponseWriter, r *http.Request) {
 	case "GET":
 		rows, err := db.Query(`SELECT id, model, max_tokens, period, webhook_url, enabled FROM budget_rules ORDER BY id`)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			log.Printf("budget rules query error: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 		defer rows.Close()
@@ -651,7 +655,8 @@ func handleBudgetRules(w http.ResponseWriter, r *http.Request) {
 			br.Model, br.MaxTokens, br.Period, br.WebhookURL,
 		).Scan(&br.ID, &br.Enabled)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			log.Printf("budget rules insert error: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -667,7 +672,8 @@ func handleBudgetRules(w http.ResponseWriter, r *http.Request) {
 		}
 		_, err = db.Exec(`DELETE FROM budget_rules WHERE id = $1`, id)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			log.Printf("budget rules delete error: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -784,7 +790,8 @@ func handleTeams(w http.ResponseWriter, r *http.Request) {
 	case "GET":
 		rows, err := db.Query(`SELECT id, name, monthly_token_budget, period FROM teams ORDER BY name`)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			log.Printf("teams query error: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 		defer rows.Close()
@@ -817,7 +824,8 @@ func handleTeams(w http.ResponseWriter, r *http.Request) {
 			t.Name, t.MonthlyTokenBudget, t.Period,
 		).Scan(&t.ID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			log.Printf("teams insert error: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 		key := fmt.Sprintf("budget:team:%s:limit", t.Name)
@@ -836,7 +844,8 @@ func handleTeams(w http.ResponseWriter, r *http.Request) {
 		var name string
 		err = db.QueryRow(`DELETE FROM teams WHERE id = $1 RETURNING name`, id).Scan(&name)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			log.Printf("teams delete error: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 		rdb.Del(r.Context(), fmt.Sprintf("budget:team:%s:limit", name))
@@ -861,7 +870,8 @@ func handleBudgetStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Printf("budget status query error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	used, _ := rdb.Get(ctx, fmt.Sprintf("budget:team:%s:used", team)).Int64()

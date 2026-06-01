@@ -15,16 +15,14 @@ evolunet_slm/__pycache__/
 evolunet_slm/*.pyc
 evolunet_slm/.venv/
 evolunet_slm/venv/
+evolunet_slm/models/
+evolunet_slm/.pytest_cache/
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
+# Go binaries
+**/*.exe
 
-# OS
-.DS_Store
-Thumbs.db
+# Environment
+.env
 
 # Docker
 *.log

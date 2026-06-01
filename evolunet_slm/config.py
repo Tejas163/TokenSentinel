@@ -35,11 +35,6 @@ class InferenceConfig:
 class ModelConfig:
     """Paths and model identity."""
 
-    repo_id: str = "Qwen/Qwen2-0.5B-Instruct-GGUF"
-    filename: str = "qwen2-0_5b-instruct-q4_k_m.gguf"
-    models_dir: Path = Path("models")
-    local_model_path: Path | None = None
-
-    def __post_init__(self):
-        self.local_model_path = self.models_dir / self.filename
+    repo_id: str = "Qwen/Qwen2-0.5B-Instruct"
+    model_dir: Path = Path("models") / "qwen2-0_5b-instruct"
 

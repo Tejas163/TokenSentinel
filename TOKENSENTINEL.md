@@ -75,6 +75,6 @@ to its job.
 - [x] Module 2: Orchestration Router (Go) — full dispatch + cost telemetry working
 - [x] Module 3: Telemetry Monitor (Erlang) — health + cost writes working
 - [x] Cost Dashboard (Go + SQLite) — persistence + API + HTML UI
-- [ ] Module 4: Enterprise SDK (Spring Boot) — scaffolded, needs implementation
+- [x] Module 4: Enterprise SDK (Spring AI) — 10 `@Tool`-annotated methods auto-registered as Spring AI `ToolCallback` beans, REST clients with retry, 21 unit tests
 - [ ] Module 5: Deploy / Benchmark / E2E — scaffolded, needs implementation
-- [ ] EvoluNet prompt optimizer — stubbed, needs operators
+- [x] EvoluNet prompt optimizer — 6 mutation operators (crossover, substitute, insert, delete, shuffle), tournament selection, elitism, fitness scoring, cost tracking, 31 tests

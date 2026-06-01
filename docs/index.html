@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TokenSentinel — AI Gateway</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <h2>TokenSentinel</h2>
+      <span>Enterprise AI Gateway</span>
+    </div>
+    <nav>
+      <div class="sidebar-section">Getting Started</div>
+      <ul>
+        <li><a href="index.html" class="active">Overview</a></li>
+        <li><a href="quickstart.html">Quick Start</a></li>
+        <li><a href="architecture.html">Architecture</a></li>
+      </ul>
+      <div class="sidebar-section">Guides</div>
+      <ul>
+        <li><a href="developer-guide.html">Developer Guide</a></li>
+        <li><a href="manual.html">User Manual</a></li>
+        <li><a href="deployment.html">Deployment</a></li>
+      </ul>
+      <div class="sidebar-section">Reference</div>
+      <ul>
+        <li><a href="api-reference.html">API Reference</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <div class="page">
+      <div class="hero-section">
+        <h1>TokenSentinel</h1>
+        <p>An enterprise-grade, distributed AI gateway that governs every token, every route, and every cost — autonomously.</p>
+        <div class="cta-buttons">
+          <a href="quickstart.html" class="btn btn-primary">Get Started</a>
+          <a href="architecture.html" class="btn btn-secondary">Architecture</a>
+          <a href="https://github.com/codejunkie99/TokenSentinel" class="btn btn-secondary">GitHub</a>
+        </div>
+      </div>
+
+      <div class="card-grid">
+        <div class="card">
+          <div class="card-icon">🛡️</div>
+          <h3>Cost Governance</h3>
+          <p>Every request records model + token usage with a CFO-ready dashboard. Real-time cost tracking, per-team budgets, and anomaly detection.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🔀</div>
+          <h3>Intelligent Routing</h3>
+          <p>Weighted random provider selection, autonomous model tier selection, and budget-aware rerouting when teams exceed limits.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">⚡</div>
+          <h3>Resilience</h3>
+          <p>Circuit breakers, retry with exponential backoff + jitter, and in-memory route caching ensure high availability for your AI infrastructure.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">📊</div>
+          <h3>Observability</h3>
+          <p>Real-time SSE dashboard, anomaly detection (3-sigma), Slack/Teams cost digests, and cost annotations on every proxied response.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🏢</div>
+          <h3>Enterprise SDK</h3>
+          <p>Spring Boot Starter SDK with Spring AI @Tool methods, Micrometer metrics, and auto-configuration for seamless Java integration.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🧬</div>
+          <h3>Prompt Optimization</h3>
+          <p>Evolutionary prompt optimization (EvoluNet-SLM) using mutation operators and LLM-based fitness scoring to discover high-performance prompts.</p>
+        </div>
+      </div>
+
+      <h2>Polyglot Architecture</h2>
+      <p>TokenSentinel is built with five languages, each chosen for its strengths:</p>
+      <table>
+        <tr><th>Service</th><th>Language</th><th>Port</th><th>Responsibility</th></tr>
+        <tr><td>rust-proxy</td><td><span class="badge rust">Rust</span></td><td>3000</td><td>TLS termination, API key auth, rate limiting, circuit breaker</td></tr>
+        <tr><td>go-router</td><td><span class="badge go">Go</span></td><td>8080</td><td>Route resolution, provider selection, cost telemetry, budget check</td></tr>
+        <tr><td>cost-dashboard</td><td><span class="badge go">Go</span></td><td>3001</td><td>Web UI, aggregation API, anomaly detection, digest webhooks</td></tr>
+        <tr><td>erlang-monitor</td><td><span class="badge erlang">Erlang</span></td><td>—</td><td>Health heartbeats, cost persistence</td></tr>
+        <tr><td>spring-boot-sdk</td><td><span class="badge java">Java</span></td><td>—</td><td>Enterprise SDK with Spring AI tools</td></tr>
+        <tr><td>evolunet-slm</td><td><span class="badge python">Python</span></td><td>—</td><td>Evolutionary prompt optimizer</td></tr>
+      </table>
+
+      <h2>Key Features</h2>
+      <ul class="feature-list">
+        <li>Sliding-window rate limiting via Redis</li>
+        <li>TLS termination & API key / JWT authentication</li>
+        <li>Weighted random provider load balancing</li>
+        <li>Autonomous model tier selection (20+ models)</li>
+        <li>Budget-aware routing per team</li>
+        <li>Cost annotations on every response</li>
+        <li>Real-time SSE cost dashboard</li>
+        <li>3-sigma anomaly detection</li>
+        <li>Slack/Teams cost digests</li>
+        <li>Per-team budgets with monthly limits</li>
+        <li>Data retention and auto-pruning</li>
+        <li>Micrometer metrics integration</li>
+        <li>Evolutionary prompt optimization</li>
+      </ul>
+    </div>
+  </main>
+</body>
+</html>

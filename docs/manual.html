@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>User Manual — TokenSentinel</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <h2>TokenSentinel</h2>
+      <span>Enterprise AI Gateway</span>
+    </div>
+    <nav>
+      <div class="sidebar-section">Getting Started</div>
+      <ul>
+        <li><a href="index.html">Overview</a></li>
+        <li><a href="quickstart.html">Quick Start</a></li>
+        <li><a href="architecture.html">Architecture</a></li>
+      </ul>
+      <div class="sidebar-section">Guides</div>
+      <ul>
+        <li><a href="developer-guide.html">Developer Guide</a></li>
+        <li><a href="manual.html" class="active">User Manual</a></li>
+        <li><a href="deployment.html">Deployment</a></li>
+      </ul>
+      <div class="sidebar-section">Reference</div>
+      <ul>
+        <li><a href="api-reference.html">API Reference</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <div class="page">
+      <h1>User Manual</h1>
+      <p class="subtitle">Complete guide to using TokenSentinel — from daily operations to advanced configuration.</p>
+
+      <h2 id="dashboard">Cost Dashboard</h2>
+      <p>The cost dashboard is the primary interface for monitoring AI spend. It is accessible at <code>http://localhost:3001</code>.</p>
+
+      <h3>Summary Cards</h3>
+      <p>The dashboard header displays four summary metrics for the selected period:</p>
+      <ul>
+        <li><strong>Total Cost</strong> — aggregate spend across all models</li>
+        <li><strong>Total Requests</strong> — number of proxied requests</li>
+        <li><strong>Total Tokens</strong> — sum of input + output tokens</li>
+        <li><strong>Avg Tokens/Req</strong> — average token consumption per request</li>
+      </ul>
+
+      <h3>Time Period Selection</h3>
+      <p>Toggle between predefined periods: <strong>1H</strong>, <strong>6H</strong>, <strong>24H</strong>, <strong>3D</strong>, <strong>7D</strong>. The dashboard reloads data on selection change.</p>
+
+      <h3>Cost by Model</h3>
+      <p>A detailed table shows cost broken down per model, with columns for requests, total tokens, and percentage of total spend.</p>
+
+      <h3>Live Events (SSE)</h3>
+      <p>When the page is open, a green badge indicates an active SSE connection. New cost events and anomaly alerts stream in real time without page refreshes. A red badge indicates a disconnected state with automatic reconnection.</p>
+
+      <h3>Anomaly Detection</h3>
+      <p>TokenSentinel detects cost anomalies using a <strong>3-sigma sliding window</strong> algorithm:</p>
+      <ul>
+        <li>Computed per-model over recent time windows</li>
+        <li>Checked every 5 minutes</li>
+        <li>Anomalies are broadcast via SSE to the dashboard</li>
+        <li>Available via REST: <code>GET /api/admin/anomalies?limit=10</code></li>
+      </ul>
+
+      <div class="info-box">
+        <strong>Pro Tip</strong>
+        Keep the dashboard open on a monitor for real-time AI cost observability during development.
+      </div>
+
+      <h2 id="headers">Response Headers</h2>
+      <p>Every proxied LLM response includes two custom headers for cost tracking:</p>
+      <table>
+        <tr><th>Header</th><th>Example</th><th>Description</th></tr>
+        <tr><td><code>X-Model-Used</code></td><td><code>gpt-4o-mini</code></td><td>The upstream model that handled the request</td></tr>
+        <tr><td><code>X-Cost-Cents</code></td><td><code>0.042</code></td><td>Cost of the request in USD cents</td></tr>
+      </table>
+
+      <h2 id="budgets">Per-Team Budgets</h2>
+      <p>TokenSentinel supports per-team budget management for cost allocation across departments or projects.</p>
+
+      <h3>Creating a Team</h3>
+      <pre><code>curl -X POST http://localhost:3001/api/admin/teams \
+  -H "Authorization: Bearer $AUTH_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "engineering", "monthly_token_limit": 10000000}'</code></pre>
+
+      <h3>Budget-Aware Routing</h3>
+      <p>When a team exceeds its budget, the gateway automatically reroutes to the cheapest available provider. This is triggered via the <code>X-Team-Name</code> request header:</p>
+      <pre><code>curl -X POST http://localhost:3000/v1/chat/completions \
+  -H "Authorization: Bearer dev-key-123" \
+  -H "X-Team-Name: engineering" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gpt-4o", "messages": [...]}'</code></pre>
+
+      <h3>Budget Alert Webhooks</h3>
+      <p>Configure webhooks to notify Slack or Teams when a team approaches its budget limit:</p>
+      <pre><code>curl -X POST http://localhost:3001/api/admin/budget-rules \
+  -H "Authorization: Bearer $AUTH_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "team_name": "engineering",
+    "threshold_pct": 80,
+    "webhook_url": "https://hooks.slack.com/services/..."
+  }'</code></pre>
+      <p>Webhooks fire when usage crosses the threshold percentage. A 30-minute cooldown prevents duplicate notifications.</p>
+
+      <h2 id="digests">Slack/Team Cost Digests</h2>
+      <p>Configure scheduled cost digests sent to Slack or Teams webhooks:</p>
+      <table>
+        <tr><th>Variable</th><th>Description</th></tr>
+        <tr><td><code>DIGEST_WEBHOOK_URL</code></td><td>Slack or Teams incoming webhook URL</td></tr>
+        <tr><td><code>DIGEST_SCHEDULE</code></td><td>Cron expression (e.g., <code>0 9 * * 1</code> for Monday 9 AM)</td></tr>
+      </table>
+      <p>Digests include a per-model cost breakdown formatted as Slack message attachments.</p>
+
+      <h2 id="auth">Authentication</h2>
+      <p>TokenSentinel uses a shared API key for service-to-service authentication:</p>
+      <ul>
+        <li><strong>Client → Rust proxy:</strong> HTTP <code>Authorization: Bearer &lt;key&gt;</code> header</li>
+        <li><strong>Rust proxy → Go router:</strong> <code>X-Authenticated-User</code> header set by Rust after key validation</li>
+        <li><strong>Dashboard/admin API:</strong> Same <code>Authorization: Bearer &lt;key&gt;</code> pattern</li>
+        <li><strong>Dashboard HTML page:</strong> Exempt from auth — accessible in any browser</li>
+      </ul>
+      <p>Set the shared key via <code>AUTH_API_KEY</code> environment variable (default: <code>dev-key-123</code>).</p>
+
+      <h2 id="routing">Routing Configuration</h2>
+      <p>Routes are stored in Redis as JSON under <code>routes:{pattern}</code>. Each route defines:</p>
+      <pre><code>{
+  "pattern": "/v1/chat/completions",
+  "providers": [
+    {
+      "name": "openai",
+      "base_url": "https://api.openai.com",
+      "api_key": "${OPENAI_API_KEY}",
+      "weight": 3
+    },
+    {
+      "name": "anthropic",
+      "base_url": "https://api.anthropic.com",
+      "weight": 1
+    }
+  ]
+}</code></pre>
+      <p>The <strong>weight</strong> field controls traffic distribution. A provider with weight 3 gets 3x the traffic of a provider with weight 1.</p>
+
+      <h2 id="model-tiers">Autonomous Model Tiers</h2>
+      <p>TokenSentinel supports automatic model selection based on prompt length:</p>
+      <table>
+        <tr><th>Tier</th><th>Prompt Length</th><th>Example Models</th></tr>
+        <tr><td>Cheap</td><td>&lt; 100 tokens</td><td>gpt-4o-mini, claude-3-haiku</td></tr>
+        <tr><td>Medium</td><td>100–500 tokens</td><td>gpt-4o, claude-3-sonnet</td></tr>
+        <tr><td>Capable</td><td>&gt; 500 tokens</td><td>gpt-4-turbo, claude-3-opus</td></tr>
+      </table>
+
+      <h2 id="data-retention">Data Retention</h2>
+      <p>Cost history entries are automatically pruned after <strong>90 days</strong> (configurable). The pruning runs periodically on the cost dashboard service.</p>
+    </div>
+  </main>
+</body>
+</html>

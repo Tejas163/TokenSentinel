@@ -1,3 +1,4 @@
-llama-cpp-python
+transformers
+torch
 numpy
 huggingface_hub

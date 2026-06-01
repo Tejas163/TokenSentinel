@@ -5,6 +5,23 @@ services:
       - "6379:6379"
     restart: unless-stopped
 
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=cost_dashboard
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d cost_dashboard"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
   rust-proxy:
     build: ./rust-proxy
     ports:
@@ -25,6 +42,7 @@ services:
       - redis
     environment:
       - REDIS_ADDR=redis:6379
+      - AUTH_API_KEY=dev-key-123
     restart: unless-stopped
 
   cost-dashboard:
@@ -32,12 +50,14 @@ services:
     ports:
       - "3001:3001"
     depends_on:
-      - redis
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
     environment:
       - REDIS_ADDR=redis:6379
-      - SQLITE_PATH=/data/cost_dashboard.db
-    volumes:
-      - cost-data:/data
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/cost_dashboard?sslmode=disable
+      - AUTH_API_KEY=dev-key-123
     restart: unless-stopped
 
   erlang-monitor:
@@ -49,4 +69,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  cost-data:
+  pg-data:

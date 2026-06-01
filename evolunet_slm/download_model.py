@@ -1,26 +1,33 @@
-"""Download a lightweight 4-bit CPU GGUF model from Hugging Face."""
+"""Download Qwen2-0.5B-Instruct (safetensors) for transformers-based inference."""
 
+import logging
 from pathlib import Path
 
-from huggingface_hub import hf_hub_download
+from huggingface_hub import snapshot_download
+from config import ModelConfig
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
-def download_qwen_gguf(repo_id: str = "Qwen/Qwen2-0.5B-Instruct-GGUF",
-                       filename: str = "qwen2-0_5b-instruct-q4_k_m.gguf",
-                       local_dir: str = "models") -> Path:
-    local_dir = Path(local_dir)
-    local_dir.mkdir(parents=True, exist_ok=True)
+def main():
+    cfg = ModelConfig()
+    target = cfg.models_dir / "qwen2-0_5b-instruct"
+    target.mkdir(parents=True, exist_ok=True)
 
-    model_path = hf_hub_download(
-        repo_id=repo_id,
-        filename=filename,
-        local_dir=str(local_dir),
-        resume_download=True,
+    logger.info("Downloading Qwen/Qwen2-0.5B-Instruct (safetensors) ...")
+    snapshot_download(
+        repo_id="Qwen/Qwen2-0.5B-Instruct",
+        local_dir=str(target),
+        local_dir_use_symlinks=False,
+        ignore_patterns=["*.gguf"],
     )
-    return Path(model_path)
+
+    size_mb = sum(
+        f.stat().st_size for f in target.rglob("*") if f.is_file()
+    ) / (1024 * 1024)
+    logger.info("Downloaded to %s (%.1f MiB)", target, size_mb)
 
 
 if __name__ == "__main__":
-    path = download_qwen_gguf()
-    print(f"Model downloaded to: {path}")
-    print(f"Size: {path.stat().st_size / 1024**3:.2f} GiB")
+    main()
