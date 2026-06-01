@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -52,15 +52,15 @@ func main() {
 	}
 	rdb = redis.NewClient(&redis.Options{Addr: redisAddr})
 
-	dsn := os.Getenv("SQLITE_PATH")
+	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
-		dsn = "cost_dashboard.db"
+		dsn = "postgres://localhost:5432/cost_dashboard?sslmode=disable"
 	}
 
 	var err error
-	db, err = sql.Open("sqlite3", dsn)
+	db, err = sql.Open("pgx", dsn)
 	if err != nil {
-		log.Fatalf("failed to open sqlite: %v", err)
+		log.Fatalf("failed to open postgres: %v", err)
 	}
 	if err = initDB(); err != nil {
 		log.Fatalf("failed to init db: %v", err)
@@ -69,6 +69,7 @@ func main() {
 	tmpls = template.Must(template.ParseFS(dashboardContent, "dashboard.html"))
 
 	go subscribeCostEvents(context.Background())
+	go dataRetention(context.Background())
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", handleDashboardHealth)
@@ -86,13 +87,13 @@ func main() {
 
 func initDB() error {
 	stmt := `CREATE TABLE IF NOT EXISTS cost_entries (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		id BIGSERIAL PRIMARY KEY,
 		request_id TEXT NOT NULL UNIQUE,
 		model TEXT NOT NULL,
 		input_tokens INTEGER NOT NULL,
 		output_tokens INTEGER NOT NULL,
-		timestamp TEXT NOT NULL,
-		ingested_at TEXT NOT NULL DEFAULT (datetime('now'))
+		timestamp TIMESTAMPTZ NOT NULL,
+		ingested_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	);`
 	_, err := db.Exec(stmt)
 	if err != nil {
@@ -104,6 +105,26 @@ func initDB() error {
 	}
 	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_cost_timestamp ON cost_entries(timestamp)`)
 	return err
+}
+
+func dataRetention(ctx context.Context) {
+	interval := 24 * time.Hour
+	maxAge := 90
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			result, err := db.Exec(`DELETE FROM cost_entries WHERE timestamp < NOW() - $1::interval`, fmt.Sprintf("%d days", maxAge))
+			if err != nil {
+				log.Printf("data retention prune failed: %v", err)
+			} else if n, _ := result.RowsAffected(); n > 0 {
+				log.Printf("data retention pruned %d entries older than %d days", n, maxAge)
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 func subscribeCostEvents(ctx context.Context) {
@@ -146,7 +167,7 @@ func ingestCost(ctx context.Context, reqID string) {
 	}
 
 	_, err = db.Exec(
-		`INSERT OR IGNORE INTO cost_entries (request_id, model, input_tokens, output_tokens, timestamp) VALUES (?, ?, ?, ?, ?)`,
+		`INSERT INTO cost_entries (request_id, model, input_tokens, output_tokens, timestamp) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (request_id) DO NOTHING`,
 		reqID, entry.Model, entry.InputTokens, entry.OutputTokens, entry.Timestamp,
 	)
 	if err != nil {
@@ -171,7 +192,7 @@ func handleCosts(w http.ResponseWriter, r *http.Request) {
 		`SELECT model, SUM(input_tokens + output_tokens) as total_tokens,
 		        SUM(input_tokens) as total_input, SUM(output_tokens) as total_output,
 		        COUNT(*) as request_count
-		 FROM cost_entries WHERE timestamp >= ? GROUP BY model ORDER BY total_tokens DESC`,
+		 FROM cost_entries WHERE timestamp >= $1 GROUP BY model ORDER BY total_tokens DESC`,
 		sinceStr,
 	)
 	if err != nil {
@@ -224,7 +245,7 @@ func handleSummary(w http.ResponseWriter, r *http.Request) {
 		`SELECT COUNT(*), COALESCE(SUM(input_tokens + output_tokens),0),
 		        COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
 		        COUNT(DISTINCT model)
-		 FROM cost_entries WHERE timestamp >= ?`,
+		 FROM cost_entries WHERE timestamp >= $1`,
 		sinceStr,
 	)
 	if err := row.Scan(&summary.TotalRequests, &summary.TotalTokens, &summary.TotalInput, &summary.TotalOutput, &summary.UniqueModels); err != nil {

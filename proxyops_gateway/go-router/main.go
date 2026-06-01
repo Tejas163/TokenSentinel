@@ -372,12 +372,20 @@ func recordCost(ctx context.Context, reqID, model string, inputTokens, outputTok
 		"timestamp":     time.Now().UTC().Format(time.RFC3339),
 	}
 	data, _ := json.Marshal(entry)
-	pipe := rdb.Pipeline()
-	pipe.Set(ctx, costKey, data, 24*time.Hour)
-	pipe.Publish(ctx, "health:events", fmt.Sprintf("cost:%s", reqID))
-	_, err := pipe.Exec(ctx)
-	if err != nil {
-		slog.Error("failed to record cost", "request_id", reqID, "error", err)
+
+	maxRetries := 3
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(50*(1<<attempt)) * time.Millisecond)
+		}
+		pipe := rdb.Pipeline()
+		pipe.Set(ctx, costKey, data, 24*time.Hour)
+		pipe.Publish(ctx, "health:events", fmt.Sprintf("cost:%s", reqID))
+		_, err := pipe.Exec(ctx)
+		if err == nil {
+			return
+		}
+		slog.Error("failed to record cost", "request_id", reqID, "attempt", attempt+1, "max_retries", maxRetries, "error", err)
 	}
 }
 
