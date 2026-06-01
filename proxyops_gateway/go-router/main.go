@@ -11,6 +11,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,6 +20,8 @@ import (
 )
 
 var rdb *redis.Client
+
+var authAPIKey string
 
 var sensitiveHeaders = map[string]bool{
 	"authorization": true,
@@ -112,17 +115,19 @@ func main() {
 		redisAddr = "localhost:6379"
 	}
 	rdb = redis.NewClient(&redis.Options{
-		Addr: redisAddr,
+		Addr:     redisAddr,
+		Password: os.Getenv("REDIS_PASSWORD"),
 	})
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+	authAPIKey = os.Getenv("AUTH_API_KEY")
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
 	mux.HandleFunc("/metrics", metricsHandler)
-	mux.HandleFunc("/", proxyHandler)
+	mux.HandleFunc("/", authMiddleware(proxyHandler))
 
-	slog.Info("starting server", "addr", ":8080", "redis", redisAddr)
+	slog.Info("starting server", "addr", ":8080", "redis", redisAddr, "auth_enabled", authAPIKey != "")
 	if err := http.ListenAndServe(":8080", mux); err != nil {
 		slog.Error("server failed", "error", err)
 		os.Exit(1)
@@ -158,6 +163,26 @@ func getHTTPClient(timeout int) *http.Client {
 	client := &http.Client{Timeout: time.Duration(timeout) * time.Second}
 	providerClients.Store(key, client)
 	return client
+}
+
+func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if authAPIKey == "" {
+			next(w, r)
+			return
+		}
+		key := r.Header.Get("X-Api-Key")
+		if key == "" {
+			if b := r.Header.Get("Authorization"); len(b) > 7 && strings.EqualFold(b[:7], "Bearer ") {
+				key = b[7:]
+			}
+		}
+		if key == "" || key != authAPIKey {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		next(w, r)
+	}
 }
 
 func proxyHandler(w http.ResponseWriter, r *http.Request) {
@@ -227,7 +252,9 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 	metricsRequestsSuccess.Add(1)
 	slog.Info("request complete", "request_id", reqID, "provider", target.URL, "model", target.Model, "status", statusCode, "latency_ms", latency)
 
-	go recordCost(context.Background(), reqID, target.Model, len(body), len(respBody))
+	inputTokens := estimateTokens(string(body), target.Model)
+	outputTokens := estimateTokens(string(respBody), target.Model)
+	go recordCost(context.Background(), reqID, target.Model, inputTokens, outputTokens)
 
 	for k, vals := range r.Header {
 		for _, v := range vals {

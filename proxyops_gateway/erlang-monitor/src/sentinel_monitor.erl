@@ -17,7 +17,16 @@ init([]) ->
     end,
     {match, [Host, Port]} = re:run(RedisUrl, "redis://([^:]+):(\\d+)", [{capture, [1,2], list}]),
     IntPort = list_to_integer(Port),
-    {ok, Conn} = eredis:start_link(Host, IntPort),
+    RedisPassword = case os:getenv("REDIS_PASSWORD") of
+        false -> undefined;
+        "" -> undefined;
+        Pass -> Pass
+    end,
+    ConnArgs = case RedisPassword of
+        undefined -> [Host, IntPort];
+        _ -> [Host, IntPort, 0, RedisPassword]
+    end,
+    {ok, Conn} = apply(eredis, start_link, ConnArgs),
     Timer = erlang:send_after(30000, self(), check_health),
     io:format("Sentinel monitor started, connected to ~s:~s~n", [Host, Port]),
     {ok, #state{redis_conn = Conn, health_timer = Timer}}.

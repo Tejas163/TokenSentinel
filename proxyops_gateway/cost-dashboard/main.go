@@ -21,9 +21,10 @@ import (
 var dashboardContent embed.FS
 
 var (
-	rdb   *redis.Client
-	db    *sql.DB
-	tmpls *template.Template
+	rdb         *redis.Client
+	db          *sql.DB
+	tmpls       *template.Template
+	authAPIKey  string
 )
 
 type CostEntry struct {
@@ -50,7 +51,10 @@ func main() {
 	if redisAddr == "" {
 		redisAddr = "localhost:6379"
 	}
-	rdb = redis.NewClient(&redis.Options{Addr: redisAddr})
+	rdb = redis.NewClient(&redis.Options{
+		Addr:     redisAddr,
+		Password: os.Getenv("REDIS_PASSWORD"),
+	})
 
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
@@ -67,15 +71,16 @@ func main() {
 	}
 
 	tmpls = template.Must(template.ParseFS(dashboardContent, "dashboard.html"))
+	authAPIKey = os.Getenv("AUTH_API_KEY")
 
 	go subscribeCostEvents(context.Background())
 	go dataRetention(context.Background())
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", handleDashboardHealth)
-	mux.HandleFunc("/api/dashboard/costs", handleCosts)
-	mux.HandleFunc("/api/dashboard/summary", handleSummary)
-	mux.HandleFunc("/", handleDashboard)
+	mux.HandleFunc("/api/dashboard/costs", authMiddleware(handleCosts))
+	mux.HandleFunc("/api/dashboard/summary", authMiddleware(handleSummary))
+	mux.HandleFunc("/", authMiddleware(handleDashboard))
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -258,6 +263,26 @@ func handleSummary(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(summary)
+}
+
+func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if authAPIKey == "" {
+			next(w, r)
+			return
+		}
+		key := r.Header.Get("X-Api-Key")
+		if key == "" {
+			if b := r.Header.Get("Authorization"); len(b) > 7 && strings.EqualFold(b[:7], "Bearer ") {
+				key = b[7:]
+			}
+		}
+		if key == "" || key != authAPIKey {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next(w, r)
+	}
 }
 
 func handleDashboardHealth(w http.ResponseWriter, r *http.Request) {
