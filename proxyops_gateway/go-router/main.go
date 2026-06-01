@@ -279,6 +279,9 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 			w.Header().Add(k, v)
 		}
 	}
+	costCents := estimateCost(inputTokens, outputTokens, target.Model)
+	w.Header().Set("X-Model-Used", target.Model)
+	w.Header().Set("X-Cost-Cents", fmt.Sprintf("%.2f", costCents))
 	w.WriteHeader(statusCode)
 	w.Write(respBody)
 }
