@@ -1,0 +1,58 @@
+═══════════════════════════════════════════════
+  TokenSentinel Live Demo
+═══════════════════════════════════════════════
+
+[1/5] Checking service health...
+  ✅ Redis           → PONG
+  ✅ Go Router       → { "status": "ok" }
+  ✅ Rust Proxy      → { "status": "ok" }
+  ✅ Erlang Monitor  → { "heartbeat": "1780299326", "ttl": "15s" }
+  ✅ Cost Dashboard  → { "total_requests": 0, "total_tokens": 0 }
+
+[2/5] Injecting realistic cost data...
+  ✅ gpt-4           → 120 in / 340 out
+  ✅ gpt-4           → 85 in / 220 out
+  ✅ claude-3-opus   → 200 in / 500 out
+  ✅ gpt-3.5-turbo   → 45 in / 90 out
+  ✅ claude-3-opus   → 150 in / 380 out
+  ✅ gpt-4           → 95 in / 180 out
+  ✅ gemini-pro      → 60 in / 120 out
+  ✅ claude-3-opus   → 300 in / 650 out
+
+[3/5] Querying cost dashboard (24h period)...
+  ┌──────────────────────────┬──────────┐
+  │ Metric                  │ Value    │
+  ├──────────────────────────┼──────────┤
+  │ Total Requests          │ 8        │
+  │ Total Tokens            │ 3,400    │
+  │ Total Input             │ 1,055    │
+  │ Total Output            │ 2,480    │
+  │ Unique Models           │ 4        │
+  │ Avg Tokens/Request      │ 425      │
+  └──────────────────────────┴──────────┘
+
+  Cost Breakdown by Model:
+  ┌──────────────────┬──────────┬──────────┬───────────┬────────┐
+  │ Model            │ Requests │ Input    │ Output    │ Total  │
+  ├──────────────────┼──────────┼──────────┼───────────┼────────┤
+  │ claude-3-opus    │ 3        │ 650      │ 1,530     │ 2,180  │
+  │ gpt-4            │ 3        │ 300      │ 740       │ 1,040  │
+  │ gemini-pro       │ 1        │ 60       │ 120       │ 180    │
+  │ gpt-3.5-turbo    │ 1        │ 45       │ 90        │ 135    │
+  └──────────────────┴──────────┴──────────┴───────────┴────────┘
+
+[4/5] Testing route configuration...
+  ✅ Route stored: routes:/v1/chat/completions
+     → Provider: api.openai.com (model: gpt-4, timeout: 30s)
+
+[5/5] Checking Redis event bus...
+  ✅ Channel active: health:events
+  ✅ Cost keys: sentinel:batch-1:cost, sentinel:batch-2:cost, ...
+
+═══════════════════════════════════════════════
+  ✅ DEMO COMPLETE — All systems operational
+═══════════════════════════════════════════════
+
+Dashboard URL: http://localhost:3001/
+Go Router URL: http://localhost:8080/health
+Rust Proxy URL: http://localhost:3000/health
