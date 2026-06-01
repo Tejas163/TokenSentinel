@@ -160,6 +160,7 @@ func main() {
 	go detectAnomalies(context.Background())
 	go checkBudgets(context.Background())
 	go syncTeamBudgets(context.Background())
+	go costDigest(context.Background())
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", handleDashboardHealth)
@@ -673,6 +674,82 @@ func handleBudgetRules(w http.ResponseWriter, r *http.Request) {
 
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func costDigest(ctx context.Context) {
+	webhookURL := os.Getenv("DIGEST_WEBHOOK_URL")
+	if webhookURL == "" {
+		return
+	}
+	schedule := os.Getenv("DIGEST_SCHEDULE")
+	if schedule == "" {
+		schedule = "24h"
+	}
+	interval, err := time.ParseDuration(schedule)
+	if err != nil {
+		log.Printf("invalid DIGEST_SCHEDULE %q, defaulting to 24h", schedule)
+		interval = 24 * time.Hour
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			sinceStr := time.Now().UTC().Add(-interval).Format(time.RFC3339)
+
+			rows, err := db.Query(
+				`SELECT model, SUM(input_tokens + output_tokens), SUM(input_tokens),
+				        SUM(output_tokens), COUNT(*)
+				 FROM cost_entries WHERE timestamp >= $1 GROUP BY model ORDER BY SUM(input_tokens + output_tokens) DESC`,
+				sinceStr,
+			)
+			if err != nil {
+				log.Printf("digest query failed: %v", err)
+				continue
+			}
+
+			var fields []map[string]interface{}
+			var totalTokens int64
+			for rows.Next() {
+				var model string
+				var total, inp, out, count int64
+				if err := rows.Scan(&model, &total, &inp, &out, &count); err != nil {
+					continue
+				}
+				totalTokens += total
+				fields = append(fields, map[string]interface{}{
+					"name":   fmt.Sprintf("%s (%d req)", model, count),
+					"value":  fmt.Sprintf("%dK tokens (in: %dK, out: %dK)", total/1000, inp/1000, out/1000),
+					"short":  true,
+				})
+			}
+			rows.Close()
+
+			payload := map[string]interface{}{
+				"text": fmt.Sprintf("TokenSentinel Cost Digest (%s)", interval.String()),
+				"attachments": []map[string]interface{}{
+					{
+						"title": "Cost Summary",
+						"fields": fields,
+						"footer": fmt.Sprintf("Total: %dK tokens", totalTokens/1000),
+						"color":  "#38bdf8",
+					},
+				},
+			}
+			data, _ := json.Marshal(payload)
+			resp, err := webhookClient.Post(webhookURL, "application/json", bytes.NewReader(data))
+			if err != nil {
+				log.Printf("digest webhook failed: %v", err)
+				continue
+			}
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			log.Printf("cost digest sent to %s", webhookURL)
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 
