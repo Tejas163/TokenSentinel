@@ -36,6 +36,15 @@ type CostEntry struct {
 	IngestedAt   string `json:"ingested_at"`
 }
 
+type AnomalyEntry struct {
+	RequestID   string  `json:"request_id"`
+	Model       string  `json:"model"`
+	TotalTokens int     `json:"total_tokens"`
+	Mean        float64 `json:"mean"`
+	Stddev      float64 `json:"stddev"`
+	ZScore      float64 `json:"z_score"`
+}
+
 type ModelCost struct {
 	Model        string  `json:"model"`
 	TotalTokens  int     `json:"total_tokens"`
@@ -75,11 +84,13 @@ func main() {
 
 	go subscribeCostEvents(context.Background())
 	go dataRetention(context.Background())
+	go detectAnomalies(context.Background())
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", handleDashboardHealth)
 	mux.HandleFunc("/api/dashboard/costs", authMiddleware(handleCosts))
 	mux.HandleFunc("/api/dashboard/summary", authMiddleware(handleSummary))
+	mux.HandleFunc("/api/dashboard/anomalies", authMiddleware(handleAnomalies))
 	mux.HandleFunc("/", authMiddleware(handleDashboard))
 
 	port := os.Getenv("PORT")
@@ -130,6 +141,99 @@ func dataRetention(ctx context.Context) {
 			return
 		}
 	}
+}
+
+func detectAnomalies(ctx context.Context) {
+	interval := 5 * time.Minute
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			period := "24h"
+			since, _ := time.ParseDuration(period)
+			sinceStr := time.Now().UTC().Add(-since).Format(time.RFC3339)
+
+			rows, err := db.Query(
+				`SELECT ce.request_id, ce.model, ce.input_tokens + ce.output_tokens,
+				        ms.mean, ms.stddev,
+				        (ce.input_tokens + ce.output_tokens - ms.mean) / NULLIF(ms.stddev, 0)
+				 FROM cost_entries ce
+				 JOIN (SELECT model, AVG(input_tokens + output_tokens) AS mean,
+				              STDDEV_SAMP(input_tokens + output_tokens) AS stddev
+				       FROM cost_entries WHERE timestamp >= $1 GROUP BY model) ms
+				   ON ce.model = ms.model
+				 WHERE ce.timestamp >= $1
+				   AND ms.stddev IS NOT NULL
+				   AND ce.input_tokens + ce.output_tokens > ms.mean + 3 * ms.stddev
+				 ORDER BY 6 DESC`,
+				sinceStr,
+			)
+			if err != nil {
+				log.Printf("anomaly query failed: %v", err)
+				continue
+			}
+
+			for rows.Next() {
+				var a AnomalyEntry
+				if err := rows.Scan(&a.RequestID, &a.Model, &a.TotalTokens, &a.Mean, &a.Stddev, &a.ZScore); err != nil {
+					continue
+				}
+				data, _ := json.Marshal(a)
+				log.Printf("ANOMALY: %s", data)
+				rdb.Publish(ctx, "anomaly:events", string(data))
+			}
+			rows.Close()
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func handleAnomalies(w http.ResponseWriter, r *http.Request) {
+	period := r.URL.Query().Get("period")
+	if period == "" {
+		period = "24h"
+	}
+	since, err := time.ParseDuration(period)
+	if err != nil {
+		http.Error(w, "invalid period", http.StatusBadRequest)
+		return
+	}
+	sinceStr := time.Now().UTC().Add(-since).Format(time.RFC3339)
+
+	rows, err := db.Query(
+		`SELECT ce.request_id, ce.model, ce.input_tokens + ce.output_tokens,
+		        ms.mean, ms.stddev,
+		        (ce.input_tokens + ce.output_tokens - ms.mean) / NULLIF(ms.stddev, 0)
+		 FROM cost_entries ce
+		 JOIN (SELECT model, AVG(input_tokens + output_tokens) AS mean,
+		              STDDEV_SAMP(input_tokens + output_tokens) AS stddev
+		       FROM cost_entries WHERE timestamp >= $1 GROUP BY model) ms
+		   ON ce.model = ms.model
+		 WHERE ce.timestamp >= $1
+		   AND ms.stddev IS NOT NULL
+		   AND ce.input_tokens + ce.output_tokens > ms.mean + 3 * ms.stddev
+		 ORDER BY 6 DESC`,
+		sinceStr,
+	)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var results []AnomalyEntry
+	for rows.Next() {
+		var a AnomalyEntry
+		if err := rows.Scan(&a.RequestID, &a.Model, &a.TotalTokens, &a.Mean, &a.Stddev, &a.ZScore); err != nil {
+			continue
+		}
+		results = append(results, a)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(results)
 }
 
 func subscribeCostEvents(ctx context.Context) {
