@@ -12,4 +12,4 @@ RUN rebar3 get-deps
 COPY src/ src/
 RUN rebar3 compile
 
-CMD ["erl", "-pa", "/app/_build/default/lib/*/ebin", "-noshell", "-eval", "sentinel_monitor:start_link()."]
+CMD ["sh", "-c", "erl -pa /app/_build/default/lib/*/ebin -noshell -eval \"sentinel_monitor:start_link().\""]
