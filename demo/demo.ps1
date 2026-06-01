@@ -20,7 +20,7 @@ Heading "TokenSentinel Live Demo"
 
 # Step 1: Check + start services
 Step "1" "Starting all services"
-docker compose -f proxyops_gateway/docker-compose.yml up -d --build 2>&1 | Out-Null
+docker compose -f proxyops_gateway/docker-compose.yml up -d 2>&1 | Out-Null
 Start-Sleep 8
 
 $redisContainer = docker ps --filter "name=redis" -q
