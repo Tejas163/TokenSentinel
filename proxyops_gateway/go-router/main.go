@@ -107,6 +107,7 @@ type UpstreamConfig struct {
 type RouteConfig struct {
 	Pattern   string           `json:"pattern"`
 	Providers []UpstreamConfig `json:"providers"`
+	AutoModel bool             `json:"auto_model"`
 }
 
 func main() {
@@ -207,14 +208,6 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	target := selectProvider(route.Providers)
-	if target == nil {
-		metricsRequestsError.Add(1)
-		slog.Error("no available providers", "request_id", reqID, "path", r.URL.Path)
-		writeError(w, http.StatusServiceUnavailable, "no available providers")
-		return
-	}
-
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		metricsRequestsError.Add(1)
@@ -223,6 +216,17 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer r.Body.Close()
+
+	target := selectProvider(route.Providers)
+	if route.AutoModel {
+		target = selectModel(body, route.Providers)
+	}
+	if target == nil {
+		metricsRequestsError.Add(1)
+		slog.Error("no available providers", "request_id", reqID, "path", r.URL.Path)
+		writeError(w, http.StatusServiceUnavailable, "no available providers")
+		return
+	}
 
 	cbKey := fmt.Sprintf("cb:%s", target.URL)
 	cb := getOrCreateCB(cbKey)
