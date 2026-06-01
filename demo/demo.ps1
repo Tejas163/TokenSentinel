@@ -6,7 +6,7 @@ $ErrorActionPreference = "Stop"
 
 function Heading($t) { Write-Host "`n============================================" -ForegroundColor Cyan; Write-Host "  $t" -ForegroundColor White; Write-Host "============================================" -ForegroundColor Cyan }
 
-function Step($n, $t) { Write-Host "`n--- Step $n: $t ---" -ForegroundColor Yellow }
+function Step($n, $t) { Write-Host "`n--- Step $n: ${t} ---" -ForegroundColor Yellow }
 function Pass($m) { Write-Host "  [OK] $m" -ForegroundColor Green }
 function Fail($m) { Write-Host "  [FAIL] $m" -ForegroundColor Red }
 
