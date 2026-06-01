@@ -93,6 +93,13 @@ type CostEntry struct {
 	IngestedAt   string `json:"ingested_at"`
 }
 
+type Team struct {
+	ID                  int    `json:"id"`
+	Name                string `json:"name"`
+	MonthlyTokenBudget  int64  `json:"monthly_token_budget"`
+	Period              string `json:"period"`
+}
+
 type BudgetRule struct {
 	ID         int    `json:"id"`
 	Model      string `json:"model"`
@@ -152,6 +159,7 @@ func main() {
 	go dataRetention(context.Background())
 	go detectAnomalies(context.Background())
 	go checkBudgets(context.Background())
+	go syncTeamBudgets(context.Background())
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", handleDashboardHealth)
@@ -160,6 +168,8 @@ func main() {
 	mux.HandleFunc("/api/dashboard/anomalies", authMiddleware(handleAnomalies))
 	mux.HandleFunc("/api/dashboard/events", authMiddleware(handleSSE))
 	mux.HandleFunc("/api/admin/budget-rules", authMiddleware(handleBudgetRules))
+	mux.HandleFunc("/api/admin/teams", authMiddleware(handleTeams))
+	mux.HandleFunc("/api/budget/status", handleBudgetStatus)
 	mux.HandleFunc("/", authMiddleware(handleDashboard))
 
 	port := os.Getenv("PORT")
@@ -178,7 +188,8 @@ func initDB() error {
 		input_tokens INTEGER NOT NULL,
 		output_tokens INTEGER NOT NULL,
 		timestamp TIMESTAMPTZ NOT NULL,
-		ingested_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		ingested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		team TEXT NOT NULL DEFAULT ''
 	);`
 	_, err := db.Exec(stmt)
 	if err != nil {
@@ -200,6 +211,19 @@ func initDB() error {
 		webhook_url TEXT NOT NULL,
 		enabled BOOLEAN NOT NULL DEFAULT true
 	)`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS teams (
+		id SERIAL PRIMARY KEY,
+		name TEXT NOT NULL UNIQUE,
+		monthly_token_budget BIGINT NOT NULL DEFAULT 0,
+		period TEXT NOT NULL DEFAULT '30d'
+	)`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_cost_team ON cost_entries(team)`)
 	return err
 }
 
@@ -346,6 +370,7 @@ func ingestCost(ctx context.Context, reqID string) {
 		InputTokens  int    `json:"input_tokens"`
 		OutputTokens int    `json:"output_tokens"`
 		Timestamp    string `json:"timestamp"`
+		Team         string `json:"team"`
 	}
 	if err := json.Unmarshal([]byte(data), &entry); err != nil {
 		log.Printf("failed to parse cost data for %s: %v", reqID, err)
@@ -357,8 +382,8 @@ func ingestCost(ctx context.Context, reqID string) {
 	}
 
 	result, err := db.Exec(
-		`INSERT INTO cost_entries (request_id, model, input_tokens, output_tokens, timestamp) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (request_id) DO NOTHING`,
-		reqID, entry.Model, entry.InputTokens, entry.OutputTokens, entry.Timestamp,
+		`INSERT INTO cost_entries (request_id, model, input_tokens, output_tokens, timestamp, team) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (request_id) DO NOTHING`,
+		reqID, entry.Model, entry.InputTokens, entry.OutputTokens, entry.Timestamp, entry.Team,
 	)
 	if err != nil {
 		log.Printf("failed to insert cost entry %s: %v", reqID, err)
@@ -372,8 +397,15 @@ func ingestCost(ctx context.Context, reqID string) {
 			"input_tokens":  entry.InputTokens,
 			"output_tokens": entry.OutputTokens,
 			"timestamp":     entry.Timestamp,
+			"team":          entry.Team,
 		})
 		events.broad <- sseEvent{Type: "cost", Data: data}
+		total := entry.InputTokens + entry.OutputTokens
+		if entry.Team != "" {
+			usedKey := fmt.Sprintf("budget:team:%s:used", entry.Team)
+			rdb.IncrBy(ctx, usedKey, int64(total))
+			rdb.Expire(ctx, usedKey, 720*time.Hour)
+		}
 	}
 }
 
@@ -642,6 +674,133 @@ func handleBudgetRules(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func syncTeamBudgets(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			rows, err := db.Query(`SELECT name, monthly_token_budget, period FROM teams`)
+			if err != nil {
+				log.Printf("team budget sync query failed: %v", err)
+				continue
+			}
+			for rows.Next() {
+				var t Team
+				if err := rows.Scan(&t.Name, &t.MonthlyTokenBudget, &t.Period); err != nil {
+					continue
+				}
+				key := fmt.Sprintf("budget:team:%s:limit", t.Name)
+				rdb.Set(ctx, key, t.MonthlyTokenBudget, 0)
+			}
+			rows.Close()
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func handleTeams(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		rows, err := db.Query(`SELECT id, name, monthly_token_budget, period FROM teams ORDER BY name`)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+		var teams []Team
+		for rows.Next() {
+			var t Team
+			if err := rows.Scan(&t.ID, &t.Name, &t.MonthlyTokenBudget, &t.Period); err != nil {
+				continue
+			}
+			teams = append(teams, t)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(teams)
+
+	case "POST":
+		var t Team
+		if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		if t.Name == "" || t.MonthlyTokenBudget <= 0 {
+			http.Error(w, "name and monthly_token_budget required", http.StatusBadRequest)
+			return
+		}
+		if t.Period == "" {
+			t.Period = "30d"
+		}
+		err := db.QueryRow(
+			`INSERT INTO teams (name, monthly_token_budget, period) VALUES ($1,$2,$3) RETURNING id`,
+			t.Name, t.MonthlyTokenBudget, t.Period,
+		).Scan(&t.ID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		key := fmt.Sprintf("budget:team:%s:limit", t.Name)
+		rdb.Set(r.Context(), key, t.MonthlyTokenBudget, 0)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(t)
+
+	case "DELETE":
+		idStr := r.URL.Query().Get("id")
+		id, err := strconv.Atoi(idStr)
+		if err != nil || id <= 0 {
+			http.Error(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		var name string
+		err = db.QueryRow(`DELETE FROM teams WHERE id = $1 RETURNING name`, id).Scan(&name)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		rdb.Del(r.Context(), fmt.Sprintf("budget:team:%s:limit", name))
+		rdb.Del(r.Context(), fmt.Sprintf("budget:team:%s:used", name))
+		w.WriteHeader(http.StatusNoContent)
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func handleBudgetStatus(w http.ResponseWriter, r *http.Request) {
+	team := r.URL.Query().Get("team")
+	if team == "" {
+		http.Error(w, "team required", http.StatusBadRequest)
+		return
+	}
+	ctx := r.Context()
+	limit, err := rdb.Get(ctx, fmt.Sprintf("budget:team:%s:limit", team)).Int64()
+	if err == redis.Nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{"team": team, "budgeted": false})
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	used, _ := rdb.Get(ctx, fmt.Sprintf("budget:team:%s:used", team)).Int64()
+	remaining := limit - used
+	if remaining < 0 {
+		remaining = 0
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"team":       team,
+		"budgeted":   true,
+		"limit":      limit,
+		"used":       used,
+		"remaining":  remaining,
+		"over_budget": used >= limit,
+	})
 }
 
 func handleSSE(w http.ResponseWriter, r *http.Request) {

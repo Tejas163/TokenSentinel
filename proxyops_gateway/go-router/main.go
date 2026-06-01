@@ -228,6 +228,20 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if team := r.Header.Get("X-Team-Name"); team != "" {
+		used, err := rdb.Get(r.Context(), fmt.Sprintf("budget:team:%s:used", team)).Int64()
+		if err == nil {
+			limit, err2 := rdb.Get(r.Context(), fmt.Sprintf("budget:team:%s:limit", team)).Int64()
+			if err2 == nil && used >= limit {
+				cheapest := cheapestProvider(route.Providers)
+				if cheapest != nil && cheapest.URL != target.URL {
+					slog.Warn("team over budget, routing to cheapest", "team", team, "original", target.URL, "cheapest", cheapest.URL)
+					target = cheapest
+				}
+			}
+		}
+	}
+
 	cbKey := fmt.Sprintf("cb:%s", target.URL)
 	cb := getOrCreateCB(cbKey)
 
@@ -297,6 +311,34 @@ func resolveRoute(ctx context.Context, path string) (*RouteConfig, error) {
 		return nil, err
 	}
 	return &cfg, nil
+}
+
+var cheapModels = []string{"gpt-3.5", "claude-3-haiku", "llama-3-8b", "mistral-small", "gemini-1.5-flash"}
+
+func cheapestProvider(providers []UpstreamConfig) *UpstreamConfig {
+	if len(providers) == 0 {
+		return nil
+	}
+	best := &providers[0]
+	bestScore := cheapestScore(best.Model)
+	for i := 1; i < len(providers); i++ {
+		s := cheapestScore(providers[i].Model)
+		if s > bestScore {
+			best = &providers[i]
+			bestScore = s
+		}
+	}
+	return best
+}
+
+func cheapestScore(model string) int {
+	lower := strings.ToLower(model)
+	for i, m := range cheapModels {
+		if strings.Contains(lower, m) {
+			return len(cheapModels) - i
+		}
+	}
+	return 0
 }
 
 func selectProvider(providers []UpstreamConfig) *UpstreamConfig {
@@ -401,6 +443,7 @@ func recordCost(ctx context.Context, reqID, model string, inputTokens, outputTok
 		"input_tokens":  inputTokens,
 		"output_tokens": outputTokens,
 		"timestamp":     time.Now().UTC().Format(time.RFC3339),
+		"team":          os.Getenv("BUDGET_TEAM_NAME"),
 	}
 	data, _ := json.Marshal(entry)
 
