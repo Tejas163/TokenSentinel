@@ -77,7 +77,8 @@ async fn handler(
     req: Request<Body>,
 ) -> Result<Response<Body>, axum::http::StatusCode> {
     let (parts, body) = req.into_parts();
-    let body_bytes = axum::body::to_bytes(body, usize::MAX)
+    const MAX_BODY_SIZE: usize = 10 * 1024 * 1024;
+    let body_bytes = axum::body::to_bytes(body, MAX_BODY_SIZE)
         .await
         .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
     let target_url = format!("{}{}", state.go_router_url, parts.uri.path());

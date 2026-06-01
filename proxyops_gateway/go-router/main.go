@@ -20,6 +20,18 @@ import (
 
 var rdb *redis.Client
 
+var sensitiveHeaders = map[string]bool{
+	"authorization": true,
+	"cookie":        true,
+	"set-cookie":    true,
+	"x-api-key":     true,
+	"proxy-authorization": true,
+}
+
+func isSensitiveHeader(k string) bool {
+	return sensitiveHeaders[k]
+}
+
 var (
 	metricsRequestsTotal   = expvar.NewInt("requests_total")
 	metricsRequestsSuccess = expvar.NewInt("requests_success")
@@ -306,6 +318,9 @@ func proxyWithRetry(ctx context.Context, reqID, target string, method string, bo
 		}
 
 		for k, vals := range headers {
+			if isSensitiveHeader(k) {
+				continue
+			}
 			for _, v := range vals {
 				req.Header.Add(k, v)
 			}

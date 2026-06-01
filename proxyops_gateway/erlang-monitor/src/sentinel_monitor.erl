@@ -25,13 +25,12 @@ init([]) ->
 handle_call({write_cost, RequestId, CostMap}, _From, State) ->
     Key = "sentinel:" ++ RequestId ++ ":cost",
     Json = jsx:encode(CostMap),
-    case eredis:q(State#state.redis_conn, ["SETEX", Key, "86400", Json]) of
-        {ok, _} ->
-            io:format("Cost written for ~s~n", [RequestId]);
-        {error, Reason} ->
-            io:format("Failed to write cost for ~s: ~p~n", [RequestId, Reason])
+    Result = eredis:q(State#state.redis_conn, ["SETEX", Key, "86400", Json]),
+    case Result of
+        {ok, _} -> io:format("Cost written for ~s~n", [RequestId]);
+        {error, Reason} -> io:format("Failed to write cost for ~s: ~p~n", [RequestId, Reason])
     end,
-    {reply, ok, State};
+    {reply, Result, State};
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
@@ -51,4 +50,4 @@ handle_info(_Msg, State) ->
     {noreply, State}.
 
 write_cost(RequestId, CostMap) ->
-    gen_server:call(?MODULE, {write_cost, RequestId, CostMap}).
+    gen_server:call(?MODULE, {write_cost, RequestId, CostMap}, 5000).
