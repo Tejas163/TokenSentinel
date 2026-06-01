@@ -286,7 +286,13 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(respBody)
 }
 
+type routeCacheEntry struct {
+	cfg    *RouteConfig
+	expiry time.Time
+}
+
 var (
+	routeCache      sync.Map
 	circuitBreakers sync.Map
 )
 
@@ -300,6 +306,14 @@ func getOrCreateCB(key string) *CircuitBreaker {
 }
 
 func resolveRoute(ctx context.Context, path string) (*RouteConfig, error) {
+	if cached, ok := routeCache.Load(path); ok {
+		entry := cached.(routeCacheEntry)
+		if time.Now().Before(entry.expiry) {
+			return entry.cfg, nil
+		}
+		routeCache.Delete(path)
+	}
+
 	pattern := fmt.Sprintf("routes:%s", path)
 	val, err := rdb.Get(ctx, pattern).Result()
 	if err == redis.Nil {
@@ -313,6 +327,7 @@ func resolveRoute(ctx context.Context, path string) (*RouteConfig, error) {
 	if err := json.Unmarshal([]byte(val), &cfg); err != nil {
 		return nil, err
 	}
+	routeCache.Store(path, routeCacheEntry{cfg: &cfg, expiry: time.Now().Add(60 * time.Second)})
 	return &cfg, nil
 }
 
