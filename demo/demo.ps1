@@ -20,7 +20,7 @@ Heading "TokenSentinel Live Demo"
 
 # Step 1: Check + start services
 Step "1" "Starting all services"
-docker compose -f proxyops_gateway/docker-compose.yml up -d 2>&1 | Out-Null
+& cmd /c "docker compose -f proxyops_gateway/docker-compose.yml up -d >nul 2>&1"
 Start-Sleep 8
 
 $redisContainer = docker ps --filter "name=redis" -q
@@ -57,8 +57,8 @@ foreach ($r in $records) {
     $i++
     $reqId = "demo-$i"
     $json = "{`"model`":`"$($r.model)`",`"input_tokens`":$($r.input),`"output_tokens`":$($r.output),`"timestamp`":`"2026-06-01T12:00:00Z`"}"
-    $json | docker exec -i $redisContainer redis-cli -x SET "sentinel:${reqId}:cost" 2>$null | Out-Null
-    docker exec $redisContainer redis-cli PUBLISH "health:events" "cost:$reqId" 2>$null | Out-Null
+    $json | docker exec -i $redisContainer redis-cli -x SET "sentinel:${reqId}:cost" *>$null
+    docker exec $redisContainer redis-cli PUBLISH "health:events" "cost:${reqId}" *>$null
     Pass "$($r.model) - $($r.input) in / $($r.output) out"
     Start-Sleep -Milliseconds 200
 }
@@ -90,7 +90,7 @@ if ($costs) {
 # Step 4: Route config
 Step "4" "Testing route configuration"
 $routeJson = '{"pattern":"/v1/chat/completions","providers":[{"url":"https://api.openai.com/v1/chat/completions","timeout":30,"model":"gpt-4","weight":1}]}'
-$routeJson | docker exec -i $redisContainer redis-cli -x SET "routes:/v1/chat/completions" 2>$null | Out-Null
+$routeJson | docker exec -i $redisContainer redis-cli -x SET "routes:/v1/chat/completions" *>$null
 $routeCheck = docker exec $redisContainer redis-cli EXISTS "routes:/v1/chat/completions" 2>$null
 if ($routeCheck -eq 1) { Pass "Route stored: /v1/chat/completions -> gpt-4" }
 
