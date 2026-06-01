@@ -4,7 +4,7 @@ mod request_id;
 use axum::{
     body::Body,
     extract::State,
-    http::Request,
+    http::{HeaderMap, HeaderName, Request, header},
     response::Response,
     routing::get,
     Router,
@@ -83,13 +83,30 @@ async fn handler(
         .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
     let target_url = format!("{}{}", state.go_router_url, parts.uri.path());
 
+    let safe_request_headers: &[HeaderName] = &[
+        header::CONTENT_TYPE,
+        header::CONTENT_LENGTH,
+        header::ACCEPT,
+        header::ACCEPT_ENCODING,
+        header::HOST,
+        header::USER_AGENT,
+        HeaderName::from_static("x-request-id"),
+        HeaderName::from_static("x-forwarded-for"),
+    ];
+    let mut filtered_headers = HeaderMap::new();
+    for h in safe_request_headers {
+        if let Some(v) = parts.headers.get(h) {
+            filtered_headers.insert(h.clone(), v.clone());
+        }
+    }
+
     state
         .circuit_breaker
         .call(|| async {
             let response = state
                 .client
                 .request(parts.method, target_url)
-                .headers(parts.headers)
+                .headers(filtered_headers)
                 .body(body_bytes)
                 .send()
                 .await
@@ -102,10 +119,19 @@ async fn handler(
                 .await
                 .map_err(|_| axum::http::StatusCode::BAD_GATEWAY)?;
 
+            let safe_response_headers: &[HeaderName] = &[
+                header::CONTENT_TYPE,
+                header::CONTENT_LENGTH,
+                header::CACHE_CONTROL,
+                header::LOCATION,
+                HeaderName::from_static("x-request-id"),
+            ];
             let mut builder = Response::builder().status(status);
             for (name, value) in headers {
                 if let Some(n) = name {
-                    builder = builder.header(n, value);
+                    if safe_response_headers.contains(&n) {
+                        builder = builder.header(n, value);
+                    }
                 }
             }
             Ok(builder.body(Body::from(body)).unwrap())

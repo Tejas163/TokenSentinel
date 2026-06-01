@@ -124,8 +124,8 @@ func main() {
 	authAPIKey = os.Getenv("AUTH_API_KEY")
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", healthHandler)
-	mux.HandleFunc("/metrics", metricsHandler)
+	mux.HandleFunc("/health", authMiddleware(healthHandler))
+	mux.HandleFunc("/metrics", authMiddleware(metricsHandler))
 	mux.HandleFunc("/", authMiddleware(proxyHandler))
 
 	slog.Info("starting server", "addr", ":8080", "redis", redisAddr, "auth_enabled", authAPIKey != "")
@@ -179,6 +179,7 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			}
 		}
 		if key == "" || key != authAPIKey {
+			slog.Warn("auth failure", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr)
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
@@ -274,11 +275,6 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 	outputTokens := estimateTokens(string(respBody), target.Model)
 	go recordCost(context.Background(), reqID, target.Model, inputTokens, outputTokens)
 
-	for k, vals := range r.Header {
-		for _, v := range vals {
-			w.Header().Add(k, v)
-		}
-	}
 	costCents := estimateCost(inputTokens, outputTokens, target.Model)
 	w.Header().Set("X-Model-Used", target.Model)
 	w.Header().Set("X-Cost-Cents", fmt.Sprintf("%.2f", costCents))

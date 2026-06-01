@@ -3,8 +3,11 @@
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"database/sql"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -163,14 +166,14 @@ func main() {
 	go costDigest(context.Background())
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", handleDashboardHealth)
+	mux.HandleFunc("/health", authMiddleware(handleDashboardHealth))
 	mux.HandleFunc("/api/dashboard/costs", authMiddleware(handleCosts))
 	mux.HandleFunc("/api/dashboard/summary", authMiddleware(handleSummary))
 	mux.HandleFunc("/api/dashboard/anomalies", authMiddleware(handleAnomalies))
 	mux.HandleFunc("/api/dashboard/events", authMiddleware(handleSSE))
 	mux.HandleFunc("/api/admin/budget-rules", authMiddleware(handleBudgetRules))
 	mux.HandleFunc("/api/admin/teams", authMiddleware(handleTeams))
-	mux.HandleFunc("/api/budget/status", handleBudgetStatus)
+	mux.HandleFunc("/api/budget/status", authMiddleware(handleBudgetStatus))
 	mux.HandleFunc("/", handleDashboard)
 
 	port := os.Getenv("PORT")
@@ -511,11 +514,29 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			}
 		}
 		if key == "" || key != authAPIKey {
+			log.Printf("auth failure: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		next(w, r)
 	}
+}
+
+func signPayload(payload []byte, key string) string {
+	mac := hmac.New(sha256.New, []byte(key))
+	mac.Write(payload)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func signAndPost(url string, payload []byte) (*http.Response, error) {
+	sig := signPayload(payload, authAPIKey)
+	req, err := http.NewRequest("POST", url, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-TokenSentinel-Signature", sig)
+	return webhookClient.Do(req)
 }
 
 func handleDashboardHealth(w http.ResponseWriter, r *http.Request) {
@@ -599,14 +620,14 @@ func checkBudgets(ctx context.Context) {
 						"exceeded_by":  totalTokens.Int64 - r.MaxTokens,
 						"checked_at":   time.Now().UTC().Format(time.RFC3339),
 					})
-					resp, postErr := webhookClient.Post(r.WebhookURL, "application/json", bytes.NewReader(payload))
+					resp, postErr := signAndPost(r.WebhookURL, payload)
 					if postErr != nil {
 						log.Printf("webhook post failed for rule %d: %v", r.ID, postErr)
 						continue
 					}
 					io.Copy(io.Discard, resp.Body)
 					resp.Body.Close()
-					log.Printf("budget alert fired for rule %d -> %s", r.ID, r.WebhookURL)
+					log.Printf("budget alert fired for rule %d -> %s (signed)", r.ID, r.WebhookURL)
 				}
 			}
 			rows.Close()
@@ -659,6 +680,7 @@ func handleBudgetRules(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
+		log.Printf("audit: budget rule created id=%d model=%s from %s", br.ID, br.Model, r.RemoteAddr)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(br)
@@ -676,6 +698,7 @@ func handleBudgetRules(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
+		log.Printf("audit: budget rule deleted id=%d from %s", id, r.RemoteAddr)
 		w.WriteHeader(http.StatusNoContent)
 
 	default:
@@ -745,14 +768,14 @@ func costDigest(ctx context.Context) {
 				},
 			}
 			data, _ := json.Marshal(payload)
-			resp, err := webhookClient.Post(webhookURL, "application/json", bytes.NewReader(data))
+			resp, err := signAndPost(webhookURL, data)
 			if err != nil {
 				log.Printf("digest webhook failed: %v", err)
 				continue
 			}
 			io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
-			log.Printf("cost digest sent to %s", webhookURL)
+			log.Printf("cost digest sent to %s (signed)", webhookURL)
 		case <-ctx.Done():
 			return
 		}
@@ -830,6 +853,7 @@ func handleTeams(w http.ResponseWriter, r *http.Request) {
 		}
 		key := fmt.Sprintf("budget:team:%s:limit", t.Name)
 		rdb.Set(r.Context(), key, t.MonthlyTokenBudget, 0)
+		log.Printf("audit: team created id=%d name=%s from %s", t.ID, t.Name, r.RemoteAddr)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(t)
@@ -850,6 +874,7 @@ func handleTeams(w http.ResponseWriter, r *http.Request) {
 		}
 		rdb.Del(r.Context(), fmt.Sprintf("budget:team:%s:limit", name))
 		rdb.Del(r.Context(), fmt.Sprintf("budget:team:%s:used", name))
+		log.Printf("audit: team deleted id=%d name=%s from %s", id, name, r.RemoteAddr)
 		w.WriteHeader(http.StatusNoContent)
 
 	default:
