@@ -3,6 +3,8 @@
 # Run: .\demo\demo.ps1
 
 $ErrorActionPreference = "Stop"
+$ProjectRoot = Split-Path -Parent $PSScriptRoot
+Set-Location $ProjectRoot
 
 function Heading($t) { Write-Host "`n============================================" -ForegroundColor Cyan; Write-Host "  $t" -ForegroundColor White; Write-Host "============================================" -ForegroundColor Cyan }
 
