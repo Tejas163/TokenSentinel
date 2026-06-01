@@ -24,5 +24,8 @@ evolunet_slm/.pytest_cache/
 # Environment
 .env
 
+# Security
+.gstack/
+
 # Docker
 *.log
