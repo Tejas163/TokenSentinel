@@ -71,6 +71,7 @@ func main() {
 	go subscribeCostEvents(context.Background())
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/health", handleDashboardHealth)
 	mux.HandleFunc("/api/dashboard/costs", handleCosts)
 	mux.HandleFunc("/api/dashboard/summary", handleSummary)
 	mux.HandleFunc("/", handleDashboard)
@@ -236,6 +237,22 @@ func handleSummary(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(summary)
+}
+
+func handleDashboardHealth(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+
+	err := rdb.Ping(ctx).Err()
+	status := "ok"
+	code := http.StatusOK
+	if err != nil {
+		status = "degraded"
+		code = http.StatusServiceUnavailable
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{"status": status})
 }
 
 func handleDashboard(w http.ResponseWriter, r *http.Request) {

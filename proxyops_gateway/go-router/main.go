@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"expvar"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"math/rand"
 	"net/http"
 	"os"
@@ -18,6 +19,16 @@ import (
 )
 
 var rdb *redis.Client
+
+var (
+	metricsRequestsTotal   = expvar.NewInt("requests_total")
+	metricsRequestsSuccess = expvar.NewInt("requests_success")
+	metricsRequestsError   = expvar.NewInt("requests_error")
+	metricsRetriesTotal    = expvar.NewInt("retries_total")
+	metricsCircuitOpen     = expvar.NewInt("circuit_breaker_open")
+	metricsCircuitClosed   = expvar.NewInt("circuit_breaker_closed")
+	metricsUpstreamLatency = expvar.NewMap("upstream_latency_ms")
+)
 
 type CircuitState int32
 
@@ -92,12 +103,23 @@ func main() {
 		Addr: redisAddr,
 	})
 
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
+	mux.HandleFunc("/metrics", metricsHandler)
 	mux.HandleFunc("/", proxyHandler)
 
-	log.Println("Go Router starting on :8080...")
-	log.Fatal(http.ListenAndServe(":8080", mux))
+	slog.Info("starting server", "addr", ":8080", "redis", redisAddr)
+	if err := http.ListenAndServe(":8080", mux); err != nil {
+		slog.Error("server failed", "error", err)
+		os.Exit(1)
+	}
+}
+
+func metricsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	expvar.Handler().ServeHTTP(w, r)
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
@@ -131,29 +153,35 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 	if reqID == "" {
 		reqID = fmt.Sprintf("gen-%d", time.Now().UnixNano())
 	}
+	start := time.Now()
+	metricsRequestsTotal.Add(1)
 
 	route, err := resolveRoute(r.Context(), r.URL.Path)
 	if err != nil {
-		log.Printf("[%s] route resolution failed: %v", reqID, err)
+		metricsRequestsError.Add(1)
+		slog.Error("route resolution failed", "request_id", reqID, "path", r.URL.Path, "error", err)
 		writeError(w, http.StatusBadGateway, "route resolution failed")
 		return
 	}
 	if route == nil {
-		log.Printf("[%s] no route for path: %s", reqID, r.URL.Path)
+		metricsRequestsError.Add(1)
+		slog.Warn("no route for path", "request_id", reqID, "path", r.URL.Path)
 		writeError(w, http.StatusNotFound, "no route for path")
 		return
 	}
 
 	target := selectProvider(route.Providers)
 	if target == nil {
-		log.Printf("[%s] no available providers", reqID)
+		metricsRequestsError.Add(1)
+		slog.Error("no available providers", "request_id", reqID, "path", r.URL.Path)
 		writeError(w, http.StatusServiceUnavailable, "no available providers")
 		return
 	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Printf("[%s] failed to read request body: %v", reqID, err)
+		metricsRequestsError.Add(1)
+		slog.Error("failed to read request body", "request_id", reqID, "error", err)
 		writeError(w, http.StatusBadRequest, "failed to read request body")
 		return
 	}
@@ -163,20 +191,29 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 	cb := getOrCreateCB(cbKey)
 
 	if !cb.Allow() {
-		log.Printf("[%s] circuit breaker open for %s", reqID, target.URL)
+		metricsCircuitOpen.Add(1)
+		metricsRequestsError.Add(1)
+		slog.Warn("circuit breaker open", "request_id", reqID, "provider", target.URL)
 		writeError(w, http.StatusServiceUnavailable, "provider temporarily unavailable")
 		return
 	}
+	metricsCircuitClosed.Add(1)
 
 	statusCode, respBody, err := proxyWithRetry(r.Context(), reqID, target.URL, r.Method, body, r.Header)
+	latency := time.Since(start).Milliseconds()
+	metricsUpstreamLatency.Add(fmt.Sprintf("%dms", latency/100*100), 1)
+
 	if err != nil {
 		cb.Failure()
-		log.Printf("[%s] upstream error for %s: %v", reqID, target.URL, err)
+		metricsRequestsError.Add(1)
+		slog.Error("upstream error", "request_id", reqID, "provider", target.URL, "error", err, "latency_ms", latency)
 		writeError(w, http.StatusBadGateway, "upstream error")
 		return
 	}
 
 	cb.Success()
+	metricsRequestsSuccess.Add(1)
+	slog.Info("request complete", "request_id", reqID, "provider", target.URL, "model", target.Model, "status", statusCode, "latency_ms", latency)
 
 	go recordCost(context.Background(), reqID, target.Model, len(body), len(respBody))
 
@@ -259,7 +296,8 @@ func proxyWithRetry(ctx context.Context, reqID, target string, method string, bo
 			delay := baseDelay * time.Duration(1<<(attempt-1))
 			jitter := time.Duration(rand.Intn(100)) * time.Millisecond
 			time.Sleep(delay + jitter)
-			log.Printf("[%s] retry attempt %d/%d after %v", reqID, attempt, maxRetries, delay+jitter)
+			metricsRetriesTotal.Add(1)
+			slog.Info("retrying request", "request_id", reqID, "attempt", attempt, "max_retries", maxRetries, "backoff_ms", (delay+jitter).Milliseconds())
 		}
 
 		req, err := http.NewRequestWithContext(ctx, method, target, bytes.NewReader(body))
@@ -324,7 +362,7 @@ func recordCost(ctx context.Context, reqID, model string, inputTokens, outputTok
 	pipe.Publish(ctx, "health:events", fmt.Sprintf("cost:%s", reqID))
 	_, err := pipe.Exec(ctx)
 	if err != nil {
-		log.Printf("[%s] failed to record cost: %v", reqID, err)
+		slog.Error("failed to record cost", "request_id", reqID, "error", err)
 	}
 }
 
