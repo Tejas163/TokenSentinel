@@ -6,7 +6,7 @@ $ErrorActionPreference = "Stop"
 
 function Heading($t) { Write-Host "`n============================================" -ForegroundColor Cyan; Write-Host "  $t" -ForegroundColor White; Write-Host "============================================" -ForegroundColor Cyan }
 
-function Step($n, $t) { Write-Host "`n--- Step $n: ${t} ---" -ForegroundColor Yellow }
+function Step($n, $t) { Write-Host "`n--- Step ${n}: ${t} ---" -ForegroundColor Yellow }
 function Pass($m) { Write-Host "  [OK] $m" -ForegroundColor Green }
 function Fail($m) { Write-Host "  [FAIL] $m" -ForegroundColor Red }
 
@@ -55,7 +55,7 @@ foreach ($r in $records) {
     $i++
     $reqId = "demo-$i"
     $json = "{`"model`":`"$($r.model)`",`"input_tokens`":$($r.input),`"output_tokens`":$($r.output),`"timestamp`":`"2026-06-01T12:00:00Z`"}"
-    $json | docker exec -i $redisContainer redis-cli -x SET "sentinel:$reqId:cost" 2>$null | Out-Null
+    $json | docker exec -i $redisContainer redis-cli -x SET "sentinel:${reqId}:cost" 2>$null | Out-Null
     docker exec $redisContainer redis-cli PUBLISH "health:events" "cost:$reqId" 2>$null | Out-Null
     Pass "$($r.model) - $($r.input) in / $($r.output) out"
     Start-Sleep -Milliseconds 200
