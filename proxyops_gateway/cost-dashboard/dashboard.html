@@ -24,10 +24,16 @@
   .period-selector button:first-child { border-radius: 6px 0 0 6px; }
   .period-selector button:last-child { border-radius: 0 6px 6px 0; }
   .loading { color: #64748b; text-align: center; padding: 2rem; }
+  .live-badge { display: inline-block; background: #22c55e; color: #0f172a; font-size: 0.65rem; padding: 0.15rem 0.5rem; border-radius: 4px; margin-left: 0.75rem; vertical-align: middle; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+  .anomaly { background: #7f1d1d !important; }
+  .anomaly td { color: #fca5a5 !important; }
+  #anomaly-alert { display: none; background: #7f1d1d; color: #fca5a5; border: 1px solid #dc2626; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
 </style>
 </head>
 <body>
-<h1>&#9632; TokenSentinel Cost Dashboard</h1>
+<h1>&#9632; TokenSentinel Cost Dashboard <span class="live-badge">LIVE</span></h1>
+<div id="anomaly-alert"></div>
 
 <div class="card">
   <div class="period-selector">
@@ -91,6 +97,35 @@ function setPeriod(p) {
 
 loadSummary('24h');
 loadCosts('24h');
+
+var evtSource = new EventSource('/api/dashboard/events');
+evtSource.addEventListener('cost', function(e) {
+  var d = JSON.parse(e.data);
+  var row = '<tr class="new-row">' +
+    '<td>' + d.model + '</td>' +
+    '<td>1</td>' +
+    '<td>' + (d.input_tokens/1000).toFixed(1) + 'K</td>' +
+    '<td>' + (d.output_tokens/1000).toFixed(1) + 'K</td>' +
+    '<td><strong>' + ((d.input_tokens + d.output_tokens)/1000).toFixed(1) + 'K</strong></td>' +
+    '<td>' + d.input_tokens + '</td>' +
+    '<td>' + d.output_tokens + '</td>' +
+    '</tr>';
+  var tbody = document.getElementById('costs');
+  tbody.insertAdjacentHTML('afterbegin', row);
+  setTimeout(function() { loadSummary(currentPeriod); }, 500);
+});
+evtSource.addEventListener('anomaly', function(e) {
+  var d = JSON.parse(e.data);
+  var alert = document.getElementById('anomaly-alert');
+  alert.style.display = 'block';
+  alert.innerHTML = '<strong>&#9888; Anomaly Detected</strong> — ' + d.model +
+    ' used ' + d.total_tokens + ' tokens (z-score: ' + d.z_score.toFixed(1) + ', ' +
+    'mean: ' + d.mean.toFixed(0) + ', stddev: ' + d.stddev.toFixed(0) + ')' +
+    ' <button onclick="this.parentElement.style.display=\'none\'" style="float:right;background:transparent;border:1px solid #dc2626;color:#fca5a5;padding:2px 8px;cursor:pointer;border-radius:4px">Dismiss</button>';
+  var tbody = document.getElementById('costs');
+  var firstRow = tbody.querySelector('tr');
+  if (firstRow) firstRow.classList.add('anomaly');
+});
 </script>
 </body>
 </html>

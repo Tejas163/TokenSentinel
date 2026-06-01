@@ -20,11 +20,64 @@ import (
 //go:embed dashboard.html
 var dashboardContent embed.FS
 
+type sseEvent struct {
+	Type string
+	Data []byte
+}
+
+type sseBroker struct {
+	subs    map[chan sseEvent]bool
+	reg     chan chan sseEvent
+	unreg   chan chan sseEvent
+	broad   chan sseEvent
+}
+
+func newSSEBroker() *sseBroker {
+	b := &sseBroker{
+		subs:  make(map[chan sseEvent]bool),
+		reg:   make(chan chan sseEvent),
+		unreg: make(chan chan sseEvent),
+		broad: make(chan sseEvent, 64),
+	}
+	go b.run()
+	return b
+}
+
+func (b *sseBroker) run() {
+	for {
+		select {
+		case ch := <-b.reg:
+			b.subs[ch] = true
+		case ch := <-b.unreg:
+			delete(b.subs, ch)
+			close(ch)
+		case ev := <-b.broad:
+			for ch := range b.subs {
+				select {
+				case ch <- ev:
+				default:
+				}
+			}
+		}
+	}
+}
+
+func (b *sseBroker) subscribe() chan sseEvent {
+	ch := make(chan sseEvent, 16)
+	b.reg <- ch
+	return ch
+}
+
+func (b *sseBroker) unsubscribe(ch chan sseEvent) {
+	b.unreg <- ch
+}
+
 var (
 	rdb         *redis.Client
 	db          *sql.DB
 	tmpls       *template.Template
 	authAPIKey  string
+	events      = newSSEBroker()
 )
 
 type CostEntry struct {
@@ -91,6 +144,7 @@ func main() {
 	mux.HandleFunc("/api/dashboard/costs", authMiddleware(handleCosts))
 	mux.HandleFunc("/api/dashboard/summary", authMiddleware(handleSummary))
 	mux.HandleFunc("/api/dashboard/anomalies", authMiddleware(handleAnomalies))
+	mux.HandleFunc("/api/dashboard/events", authMiddleware(handleSSE))
 	mux.HandleFunc("/", authMiddleware(handleDashboard))
 
 	port := os.Getenv("PORT")
@@ -182,6 +236,7 @@ func detectAnomalies(ctx context.Context) {
 				data, _ := json.Marshal(a)
 				log.Printf("ANOMALY: %s", data)
 				rdb.Publish(ctx, "anomaly:events", string(data))
+				events.broad <- sseEvent{Type: "anomaly", Data: data}
 			}
 			rows.Close()
 		case <-ctx.Done():
@@ -275,12 +330,24 @@ func ingestCost(ctx context.Context, reqID string) {
 		return
 	}
 
-	_, err = db.Exec(
+	result, err := db.Exec(
 		`INSERT INTO cost_entries (request_id, model, input_tokens, output_tokens, timestamp) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (request_id) DO NOTHING`,
 		reqID, entry.Model, entry.InputTokens, entry.OutputTokens, entry.Timestamp,
 	)
 	if err != nil {
 		log.Printf("failed to insert cost entry %s: %v", reqID, err)
+		return
+	}
+	n, _ := result.RowsAffected()
+	if n > 0 {
+		data, _ := json.Marshal(map[string]interface{}{
+			"request_id":    reqID,
+			"model":         entry.Model,
+			"input_tokens":  entry.InputTokens,
+			"output_tokens": entry.OutputTokens,
+			"timestamp":     entry.Timestamp,
+		})
+		events.broad <- sseEvent{Type: "cost", Data: data}
 	}
 }
 
@@ -403,6 +470,31 @@ func handleDashboardHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"status": status})
+}
+
+func handleSSE(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	flusher.Flush()
+
+	ch := events.subscribe()
+	defer events.unsubscribe(ch)
+
+	for {
+		select {
+		case ev := <-ch:
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Type, ev.Data)
+			flusher.Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
 }
 
 func handleDashboard(w http.ResponseWriter, r *http.Request) {
