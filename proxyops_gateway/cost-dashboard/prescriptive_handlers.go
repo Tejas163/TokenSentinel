@@ -378,7 +378,7 @@ func handleRunAssessment(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	report, err := RunAssessment(id)
+	report, err := RunAssessment(appStore, id)
 	if err != nil {
 		log.Printf("run assessment error: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -410,7 +410,7 @@ func handleWhatIf(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
-	projections, err := RunWhatIf(id, adjustments)
+	projections, err := RunWhatIf(appStore, id, adjustments)
 	if err != nil {
 		log.Printf("what-if error: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)

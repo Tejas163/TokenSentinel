@@ -25,7 +25,7 @@ func handleReport(w http.ResponseWriter, r *http.Request, id int) {
 		return
 	}
 
-	report, err := GetReport(id)
+	report, err := GetReport(appStore, id)
 	if err != nil {
 		log.Printf("get report error: %v", err)
 		http.Error(w, err.Error(), http.StatusNotFound)

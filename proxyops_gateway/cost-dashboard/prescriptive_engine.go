@@ -1,8 +1,6 @@
 package main
 
 import (
-	"database/sql"
-	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
@@ -90,39 +88,24 @@ func findModel(name string) *ModelInfo {
 	return nil
 }
 
-func RunAssessment(assessmentID int) (*AssessmentReport, error) {
-	var a Assessment
-	var gpuJSON, tokenJSON, providerJSON, teamJSON []byte
-	var createdAt, updatedAt time.Time
-
-	err := db.QueryRow(`SELECT id, company_name, cloud_vendor, gpu_configs, monthly_request_volume,
-		token_distribution, current_monthly_spend, providers_used, team_composition, source, version, created_at, updated_at
-		FROM assessments WHERE id = $1`, assessmentID).Scan(
-		&a.ID, &a.CompanyName, &a.CloudVendor, &gpuJSON, &a.MonthlyRequestVolume,
-		&tokenJSON, &a.CurrentMonthlySpend, &providerJSON, &teamJSON, &a.Source, &a.Version, &createdAt, &updatedAt)
-	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("assessment %d not found", assessmentID)
-	}
+func RunAssessment(store Store, assessmentID int) (*AssessmentReport, error) {
+	a, err := store.GetAssessment(assessmentID)
 	if err != nil {
-		return nil, fmt.Errorf("query assessment %d: %w", assessmentID, err)
+		return nil, err
 	}
-
-	json.Unmarshal(gpuJSON, &a.GPUConfigs)
-	json.Unmarshal(tokenJSON, &a.TokenDistribution)
-	json.Unmarshal(providerJSON, &a.ProvidersUsed)
-	json.Unmarshal(teamJSON, &a.TeamComposition)
 
 	var liveData *AssessmentLiveData
 	if a.Source == "live" {
-		ld, err := pullLiveCostData(assessmentID)
+		since := time.Now().UTC().Add(-30 * 24 * time.Hour)
+		ld, err := store.QueryLiveCostData(since)
 		if err == nil && ld != nil {
 			liveData = ld
 			a.CurrentMonthlySpend = ld.TotalMonthlyCost
 		}
 	}
 
-	costBreakdown := calculateCostBreakdown(&a, liveData)
-	recommendations := generateRecommendations(&a, costBreakdown)
+	costBreakdown := calculateCostBreakdown(a, liveData)
+	recommendations := generateRecommendations(a, costBreakdown)
 	totalCurrent := 0.0
 	totalProjected := 0.0
 	for _, c := range costBreakdown {
@@ -134,28 +117,17 @@ func RunAssessment(assessmentID int) (*AssessmentReport, error) {
 		totalSavings += r.MonthlySavings
 	}
 
-	db.Exec(`DELETE FROM cost_projections WHERE assessment_id = $1 AND scenario = 'base'`, assessmentID)
-	for _, cp := range costBreakdown {
-		db.Exec(`INSERT INTO cost_projections (assessment_id, model, provider, current_monthly_cost, projected_monthly_cost, input_tokens_millions, output_tokens_millions, scenario)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,'base')`,
-			assessmentID, cp.Model, cp.Provider, cp.CurrentMonthlyCost, cp.ProjectedMonthlyCost, cp.InputTokensMillions, cp.OutputTokensMillions)
-	}
-	db.Exec(`DELETE FROM recommendations WHERE assessment_id = $1`, assessmentID)
-	for _, rec := range recommendations {
-		db.Exec(`INSERT INTO recommendations (assessment_id, category, description, current_cost, projected_cost, monthly_savings, payback_period_days, priority)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-			assessmentID, rec.Category, rec.Description, rec.CurrentCost, rec.ProjectedCost, rec.MonthlySavings, rec.PaybackPeriodDays, rec.Priority)
-	}
+	store.ReplaceCostProjections(assessmentID, costBreakdown)
+	store.ReplaceRecommendations(assessmentID, recommendations)
 
-	report := &AssessmentReport{
-		Assessment:     a,
-		CostBreakdown:  costBreakdown,
+	return &AssessmentReport{
+		Assessment:      *a,
+		CostBreakdown:   costBreakdown,
 		Recommendations: recommendations,
-		TotalCurrent:   totalCurrent,
-		TotalProjected: totalProjected,
-		TotalSavings:   totalSavings,
-	}
-	return report, nil
+		TotalCurrent:    totalCurrent,
+		TotalProjected:  totalProjected,
+		TotalSavings:    totalSavings,
+	}, nil
 }
 
 type AssessmentLiveData struct {
@@ -167,38 +139,6 @@ type ModelUsage struct {
 	InputTokens  int64
 	OutputTokens int64
 	RequestCount int64
-}
-
-func pullLiveCostData(assessmentID int) (*AssessmentLiveData, error) {
-	since := time.Now().UTC().Add(-30 * 24 * time.Hour).Format(time.RFC3339)
-	rows, err := db.Query(`SELECT model, SUM(input_tokens), SUM(output_tokens), COUNT(*)
-		FROM cost_entries WHERE timestamp >= $1 GROUP BY model`, since)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	ld := &AssessmentLiveData{Models: make(map[string]*ModelUsage)}
-	for rows.Next() {
-		var model string
-		var inputSum, outputSum, count int64
-		if err := rows.Scan(&model, &inputSum, &outputSum, &count); err != nil {
-			continue
-		}
-		ld.Models[model] = &ModelUsage{
-			InputTokens:  inputSum,
-			OutputTokens: outputSum,
-			RequestCount: count,
-		}
-		inputCost := (float64(inputSum) / 1000) * 30.00
-		outputCost := (float64(outputSum) / 1000) * 60.00
-		if mi := findModel(model); mi != nil {
-			inputCost = (float64(inputSum) / 1000) * mi.InputPrice
-			outputCost = (float64(outputSum) / 1000) * mi.OutputPrice
-		}
-		ld.TotalMonthlyCost += inputCost + outputCost
-	}
-	return ld, nil
 }
 
 func calculateCostBreakdown(a *Assessment, liveData *AssessmentLiveData) []CostProjection {
@@ -463,64 +403,20 @@ func recommendBatchOptimization(a *Assessment, costBreakdown []CostProjection) [
 	}}
 }
 
-func GetReport(assessmentID int) (*AssessmentReport, error) {
-	var a Assessment
-	var gpuJSON, tokenJSON, providerJSON, teamJSON []byte
-	var createdAt, updatedAt time.Time
-	err := db.QueryRow(`SELECT id, company_name, cloud_vendor, gpu_configs, monthly_request_volume,
-		token_distribution, current_monthly_spend, providers_used, team_composition, source, version, created_at, updated_at
-		FROM assessments WHERE id = $1`, assessmentID).Scan(
-		&a.ID, &a.CompanyName, &a.CloudVendor, &gpuJSON, &a.MonthlyRequestVolume,
-		&tokenJSON, &a.CurrentMonthlySpend, &providerJSON, &teamJSON, &a.Source, &a.Version, &createdAt, &updatedAt)
-	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("assessment %d not found", assessmentID)
-	}
+func GetReport(store Store, assessmentID int) (*AssessmentReport, error) {
+	a, err := store.GetAssessment(assessmentID)
 	if err != nil {
 		return nil, err
 	}
-	json.Unmarshal(gpuJSON, &a.GPUConfigs)
-	json.Unmarshal(tokenJSON, &a.TokenDistribution)
-	json.Unmarshal(providerJSON, &a.ProvidersUsed)
-	json.Unmarshal(teamJSON, &a.TeamComposition)
-	a.CreatedAt = createdAt.Format(time.RFC3339)
-	a.UpdatedAt = updatedAt.Format(time.RFC3339)
 
-	projRows, err := db.Query(`SELECT model, provider, current_monthly_cost, projected_monthly_cost, input_tokens_millions, output_tokens_millions
-		FROM cost_projections WHERE assessment_id = $1 AND scenario = 'base'`, assessmentID)
+	projections, err := store.GetCostProjections(assessmentID, "base")
 	if err != nil {
 		return nil, err
 	}
-	defer projRows.Close()
 
-	var projections []CostProjection
-	for projRows.Next() {
-		var cp CostProjection
-		if err := projRows.Scan(&cp.Model, &cp.Provider, &cp.CurrentMonthlyCost, &cp.ProjectedMonthlyCost, &cp.InputTokensMillions, &cp.OutputTokensMillions); err != nil {
-			continue
-		}
-		cp.Scenario = "base"
-		cp.AssessmentID = assessmentID
-		projections = append(projections, cp)
-	}
-
-	recRows, err := db.Query(`SELECT id, category, description, current_cost, projected_cost, monthly_savings, payback_period_days, priority, created_at
-		FROM recommendations WHERE assessment_id = $1 ORDER BY
-		CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, monthly_savings DESC`, assessmentID)
+	recs, err := store.GetRecommendations(assessmentID)
 	if err != nil {
 		return nil, err
-	}
-	defer recRows.Close()
-
-	var recs []Recommendation
-	for recRows.Next() {
-		var r Recommendation
-		var createdAt time.Time
-		if err := recRows.Scan(&r.ID, &r.Category, &r.Description, &r.CurrentCost, &r.ProjectedCost, &r.MonthlySavings, &r.PaybackPeriodDays, &r.Priority, &createdAt); err != nil {
-			continue
-		}
-		r.AssessmentID = assessmentID
-		r.CreatedAt = createdAt.Format(time.RFC3339)
-		recs = append(recs, r)
 	}
 
 	totalCurrent := 0.0
@@ -538,7 +434,7 @@ func GetReport(assessmentID int) (*AssessmentReport, error) {
 	}
 
 	return &AssessmentReport{
-		Assessment:      a,
+		Assessment:      *a,
 		CostBreakdown:   projections,
 		Recommendations: recs,
 		TotalCurrent:    totalCurrent,
@@ -547,24 +443,11 @@ func GetReport(assessmentID int) (*AssessmentReport, error) {
 	}, nil
 }
 
-func RunWhatIf(assessmentID int, adjustments map[string]float64) ([]CostProjection, error) {
-	var a Assessment
-	var gpuJSON, tokenJSON, providerJSON, teamJSON []byte
-	err := db.QueryRow(`SELECT id, company_name, cloud_vendor, gpu_configs, monthly_request_volume,
-		token_distribution, current_monthly_spend, providers_used, team_composition, source, version
-		FROM assessments WHERE id = $1`, assessmentID).Scan(
-		&a.ID, &a.CompanyName, &a.CloudVendor, &gpuJSON, &a.MonthlyRequestVolume,
-		&tokenJSON, &a.CurrentMonthlySpend, &providerJSON, &teamJSON, &a.Source, &a.Version)
-	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("assessment %d not found", assessmentID)
-	}
+func RunWhatIf(store Store, assessmentID int, adjustments map[string]float64) ([]CostProjection, error) {
+	a, err := store.GetAssessment(assessmentID)
 	if err != nil {
 		return nil, err
 	}
-	json.Unmarshal(gpuJSON, &a.GPUConfigs)
-	json.Unmarshal(tokenJSON, &a.TokenDistribution)
-	json.Unmarshal(providerJSON, &a.ProvidersUsed)
-	json.Unmarshal(teamJSON, &a.TeamComposition)
 
 	if v, ok := adjustments["volume_multiplier"]; ok {
 		a.MonthlyRequestVolume = int64(float64(a.MonthlyRequestVolume) * v)
@@ -574,16 +457,12 @@ func RunWhatIf(assessmentID int, adjustments map[string]float64) ([]CostProjecti
 		a.TokenDistribution.OutputPct = 1 - v
 	}
 
-	costBreakdown := calculateCostBreakdown(&a, nil)
+	costBreakdown := calculateCostBreakdown(a, nil)
 	for i := range costBreakdown {
 		costBreakdown[i].Scenario = "whatif"
 	}
 
-	for _, cp := range costBreakdown {
-		db.Exec(`INSERT INTO cost_projections (assessment_id, model, provider, current_monthly_cost, projected_monthly_cost, input_tokens_millions, output_tokens_millions, scenario)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,'whatif')`,
-			assessmentID, cp.Model, cp.Provider, cp.CurrentMonthlyCost, cp.ProjectedMonthlyCost, cp.InputTokensMillions, cp.OutputTokensMillions)
-	}
+	store.InsertCostProjections(assessmentID, costBreakdown, "whatif")
 
 	return costBreakdown, nil
 }

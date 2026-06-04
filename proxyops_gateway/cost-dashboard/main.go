@@ -85,6 +85,7 @@ var (
 	tmpls       *template.Template
 	authAPIKey  string
 	events      = newSSEBroker()
+	appStore    Store
 )
 
 type CostEntry struct {
@@ -163,6 +164,7 @@ func main() {
 
 	tmpls = template.Must(template.ParseFS(dashboardContent, "dashboard.html"))
 	authAPIKey = os.Getenv("AUTH_API_KEY")
+	appStore = &pgStore{db: db}
 	initEmailConfig()
 
 	go subscribeCostEvents(context.Background())

@@ -88,7 +88,7 @@ func exportCSV(w http.ResponseWriter, assessmentID int) {
 }
 
 func exportPDF(w http.ResponseWriter, assessmentID int) {
-	report, err := GetReport(assessmentID)
+	report, err := GetReport(appStore, assessmentID)
 	if err != nil {
 		log.Printf("pdf export: %v", err)
 		http.Error(w, err.Error(), http.StatusNotFound)

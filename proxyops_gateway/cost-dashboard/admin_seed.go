@@ -71,7 +71,7 @@ func handleAdminSeed(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Run prescriptive engine (re-runs if already exists, clearing stale data)
-	report, err := RunAssessment(aid)
+	report, err := RunAssessment(appStore, aid)
 	if err != nil {
 		log.Printf("seed: run assessment error: %v", err)
 	} else {

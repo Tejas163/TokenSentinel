@@ -33,7 +33,7 @@ func handleReportFrontend(w http.ResponseWriter, r *http.Request) {
 			key = r.URL.Query().Get("api_key")
 		}
 		if key == authAPIKey {
-			report, err := GetReport(id)
+			report, err := GetReport(appStore, id)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusNotFound)
 				return
