@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 mod mcp;
 mod a2a;
 mod identity;
