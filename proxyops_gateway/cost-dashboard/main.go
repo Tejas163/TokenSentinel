@@ -154,11 +154,21 @@ func main() {
 	if err = initDB(); err != nil {
 		log.Fatalf("failed to init db: %v", err)
 	}
+	if err = initPrescriptiveTables(db); err != nil {
+		log.Fatalf("failed to init prescriptive tables: %v", err)
+	}
+	if err = initMonitoringTables(db); err != nil {
+		log.Fatalf("failed to init monitoring tables: %v", err)
+	}
 
 	tmpls = template.Must(template.ParseFS(dashboardContent, "dashboard.html"))
 	authAPIKey = os.Getenv("AUTH_API_KEY")
+	initEmailConfig()
 
 	go subscribeCostEvents(context.Background())
+	go monitorSpendTrends(context.Background())
+	go trackSavings(context.Background())
+	go sendAlerts(context.Background())
 	go dataRetention(context.Background())
 	go detectAnomalies(context.Background())
 	go checkBudgets(context.Background())
@@ -174,7 +184,12 @@ func main() {
 	mux.HandleFunc("/api/admin/budget-rules", authMiddleware(handleBudgetRules))
 	mux.HandleFunc("/api/admin/teams", authMiddleware(handleTeams))
 	mux.HandleFunc("/api/budget/status", authMiddleware(handleBudgetStatus))
-	mux.HandleFunc("/", handleDashboard)
+	mux.HandleFunc("/api/prescriptive/report/", handleReportFrontend)
+	mux.HandleFunc("/api/prescriptive/", authMiddleware(handlePrescriptiveRouter))
+	mux.HandleFunc("/api/monitoring/", authMiddleware(handleMonitoringRouter))
+	mux.HandleFunc("/assessments", handleAssessmentFrontend)
+	mux.HandleFunc("/dashboard", handleDashboard)
+	mux.HandleFunc("/", handleLanding)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -512,6 +527,9 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			if b := r.Header.Get("Authorization"); len(b) > 7 && strings.EqualFold(b[:7], "Bearer ") {
 				key = b[7:]
 			}
+		}
+		if key == "" {
+			key = r.URL.Query().Get("api_key")
 		}
 		if key == "" || key != authAPIKey {
 			log.Printf("auth failure: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
@@ -941,7 +959,8 @@ func handleSSE(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleDashboard(w http.ResponseWriter, r *http.Request) {
-	tmpls.Execute(w, nil)
+	data := map[string]string{"APIKey": authAPIKey}
+	tmpls.Execute(w, data)
 }
 
 

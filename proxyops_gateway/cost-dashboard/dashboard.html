@@ -29,11 +29,38 @@
   .anomaly { background: #7f1d1d !important; }
   .anomaly td { color: #fca5a5 !important; }
   #anomaly-alert { display: none; background: #7f1d1d; color: #fca5a5; border: 1px solid #dc2626; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+  #alert-toast-container { position: fixed; top: 1rem; right: 1rem; z-index: 1000; display: flex; flex-direction: column; gap: 0.5rem; max-width: 400px; }
+  .alert-toast { padding: 0.75rem 1rem; border-radius: 8px; border: 1px solid; font-size: 0.85rem; box-shadow: 0 4px 12px rgba(0,0,0,0.4); animation: slideIn 0.3s ease; }
+  .alert-toast.critical { background: #7f1d1d; color: #fca5a5; border-color: #dc2626; }
+  .alert-toast.warning { background: #713f12; color: #fde68a; border-color: #f59e0b; }
+  .alert-toast.info { background: #1e3a5f; color: #93c5fd; border-color: #3b82f6; }
+  @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+  #alert-banner { margin-bottom: 1rem; }
+  #alert-list { max-height: 300px; overflow-y: auto; }
+  .alert-item { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0.75rem; border-radius: 6px; margin-bottom: 0.25rem; font-size: 0.85rem; }
+  .alert-item.critical { background: #7f1d1d; color: #fca5a5; }
+  .alert-item.warning { background: #713f12; color: #fde68a; }
+  .alert-item.info { background: #1e3a5f; color: #93c5fd; }
+  .alert-item button { background: transparent; border: 1px solid currentColor; color: inherit; padding: 0.15rem 0.5rem; border-radius: 4px; cursor: pointer; font-size: 0.75rem; }
 </style>
 </head>
-<body>
-<h1>&#9632; TokenSentinel Cost Dashboard <span class="live-badge">LIVE</span></h1>
+<body data-api-key="{{index . "APIKey"}}">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem;">
+<h1 style="margin-bottom:0;">&#9632; TokenSentinel Cost Dashboard <span class="live-badge">LIVE</span></h1>
+<a href="/assessments" style="color:#94a3b8;text-decoration:none;padding:0.5rem 1rem;border-radius:6px;font-size:0.875rem;border:1px solid #334155;">Assessments</a>
+<a href="https://github.com/Tejas163/TokenSentinel" target="_blank" style="color:#94a3b8;text-decoration:none;padding:0.5rem 1rem;border-radius:6px;font-size:0.875rem;border:1px solid #334155;">GitHub</a>
+<a href="/" style="color:#94a3b8;text-decoration:none;padding:0.5rem 1rem;border-radius:6px;font-size:0.875rem;border:1px solid #334155;">Home</a>
+</div>
 <div id="anomaly-alert"></div>
+<div id="alert-toast-container"></div>
+
+<div class="card" id="alert-banner" style="display:none;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
+    <h2 style="margin:0;">Active Alerts</h2>
+    <button onclick="this.parentElement.parentElement.style.display='none'" style="background:transparent;border:1px solid #475569;color:#94a3b8;padding:2px 8px;border-radius:4px;cursor:pointer;">Hide</button>
+  </div>
+  <div id="alert-list"></div>
+</div>
 
 <div class="card">
   <div class="period-selector">
@@ -54,9 +81,10 @@
 
 <script>
 let currentPeriod = '24h';
+const API_KEY = document.body.getAttribute('data-api-key');
 
 async function loadSummary(period) {
-  const r = await fetch('/api/dashboard/summary?period=' + period);
+  const r = await fetch('/api/dashboard/summary?period=' + period, {headers:{'X-Api-Key':API_KEY}});
   const d = await r.json();
   document.getElementById('summary').innerHTML = [
     '<div class="stat"><div class="value">' + d.total_requests + '</div><div class="label">Requests</div></div>',
@@ -70,7 +98,7 @@ async function loadSummary(period) {
 
 async function loadCosts(period) {
   document.getElementById('loading').style.display = 'block';
-  const r = await fetch('/api/dashboard/costs?period=' + period);
+  const r = await fetch('/api/dashboard/costs?period=' + period, {headers:{'X-Api-Key':API_KEY}});
   const d = await r.json();
   document.getElementById('loading').style.display = 'none';
   document.getElementById('costs').innerHTML = d.map(function(m) {
@@ -98,7 +126,7 @@ function setPeriod(p) {
 loadSummary('24h');
 loadCosts('24h');
 
-var evtSource = new EventSource('/api/dashboard/events');
+var evtSource = new EventSource('/api/dashboard/events?api_key=' + API_KEY);
 evtSource.addEventListener('cost', function(e) {
   var d = JSON.parse(e.data);
   var row = '<tr class="new-row">' +
@@ -126,6 +154,49 @@ evtSource.addEventListener('anomaly', function(e) {
   var firstRow = tbody.querySelector('tr');
   if (firstRow) firstRow.classList.add('anomaly');
 });
+evtSource.addEventListener('alert', function(e) {
+  var d = JSON.parse(e.data);
+  showAlertToast(d);
+  addAlertBanner(d);
+});
+loadActiveAlerts();
+
+function showAlertToast(d) {
+  var container = document.getElementById('alert-toast-container');
+  var toast = document.createElement('div');
+  toast.className = 'alert-toast ' + d.severity;
+  toast.innerHTML = '<strong>[' + d.severity.toUpperCase() + ']</strong> ' + d.message +
+    ' <button onclick="this.parentElement.remove()" style="float:right;background:transparent;border:none;color:inherit;cursor:pointer;font-size:1rem;">&times;</button>';
+  container.appendChild(toast);
+  setTimeout(function() { if (toast.parentElement) toast.remove(); }, 30000);
+}
+
+function addAlertBanner(d) {
+  var banner = document.getElementById('alert-banner');
+  banner.style.display = 'block';
+  var list = document.getElementById('alert-list');
+  var item = document.createElement('div');
+  item.className = 'alert-item ' + d.severity;
+  item.innerHTML = '<span><strong>[' + d.severity.toUpperCase() + ']</strong> ' + d.message + '</span>' +
+    ' <button onclick="this.parentElement.remove()">Dismiss</button>';
+  list.insertBefore(item, list.firstChild);
+}
+
+async function loadActiveAlerts() {
+  try {
+    var r = await fetch('/api/monitoring/alerts?unacknowledged=true', {headers:{'X-Api-Key':API_KEY}});
+    var alerts = await r.json();
+    if (alerts.length === 0) return;
+    var banner = document.getElementById('alert-banner');
+    banner.style.display = 'block';
+    var list = document.getElementById('alert-list');
+    list.innerHTML = alerts.slice(0, 20).map(function(a) {
+      return '<div class="alert-item ' + a.severity + '">' +
+        '<span><strong>[' + a.severity.toUpperCase() + ']</strong> ' + a.message + '</span>' +
+        ' <button onclick="fetch(\'/api/monitoring/alerts/' + a.id + '/acknowledge\',{method:\'POST\',headers:{\'X-Api-Key\':\'' + API_KEY + '\'}}).then(function(){this.parentElement.remove()}.bind(this))">Ack</button></div>';
+    }).join('');
+  } catch(e) {}
+}
 </script>
 </body>
 </html>

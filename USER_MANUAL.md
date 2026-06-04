@@ -337,6 +337,113 @@ Cost entries older than 90 days are automatically pruned daily. The cost dashboa
 
 ---
 
+## Prescriptive Engine
+
+TokenSentinel includes a prescriptive engine that analyzes your cloud infrastructure, model usage, and team composition to generate cost-saving recommendations.
+
+### Creating an Assessment
+
+1. **POST** `/api/prescriptive/assessments` with your company details, GPU config, monthly volumes, providers used, and team composition
+2. Optionally fetch one of three starter templates via **GET** `/api/prescriptive/templates` to pre-fill common setups
+3. Set `"source": "live"` to auto-pull existing cost data from the gateway, or `"source": "manual"` to provide your own spend figures
+
+### Running the Engine
+
+**POST** `/api/prescriptive/assessments/{id}/run` triggers the analysis:
+
+- **Cost breakdown** — Per-model and per-provider spend with token volumes
+- **Model substitution** — Identifies opportunities to replace expensive models with cheaper equivalents (e.g., GPT-4 → Llama-3-70B for simpler tasks)
+- **Infra downsizing** — Detects underutilized GPU capacity and recommends cluster size reductions
+- **Provider switching** — Estimates savings from moving workloads to self-hosted or alternative providers
+- **Batch optimization** — Identifies workloads suitable for off-peak/batch processing
+
+### Viewing the Report
+
+Navigate to `/api/prescriptive/report/{id}` in your browser to see:
+
+- **Executive Summary** — Current spend, projected spend, savings rate, top recommendation
+- **Cost Breakdown** — Table by model with team drill-down toggle
+- **Recommendations** — Sorted by priority (high/medium/low) with monthly savings and payback period
+- **What-If Simulator** — Interactive sliders to adjust request volume and input/output token ratio; recalculates projections client-side in real-time
+- **Version History** — Compare versions side-by-side using the overlay picker
+
+### Exporting Reports
+
+- **CSV** — `/api/prescriptive/report/{id}/csv` downloads cost projections and recommendations as a spreadsheet
+- **PDF** — `/api/prescriptive/report/{id}/pdf` generates a formatted document with executive summary, cost table, and top recommendations
+
+### CSV Import
+
+Import billing data from any provider via **POST** `/api/prescriptive/import/csv`. Send a multipart form with:
+
+| Field | Description |
+|-------|-------------|
+| `file` | The CSV file |
+| `assessment_id` | Target assessment ID (optional) |
+| `has_header` | `"true"` or `"false"` |
+| `model_column` | Column index for model name (0-based) |
+| `input_tokens_column` | Column index for input tokens |
+| `output_tokens_column` | Column index for output tokens |
+| `cost_column` | Column index for cost (optional) |
+
+---
+
+## Continuous Optimization
+
+The continuous optimization engine runs as background goroutines inside the cost-dashboard service, monitoring spend patterns, detecting savings, and dispatching alerts — no manual action needed.
+
+### How It Works
+
+Three goroutines run continuously:
+
+| Goroutine | Interval | Purpose |
+|-----------|----------|---------|
+| `monitorSpendTrends` | 5 min | Compares each model's spend against rolling 7-day baseline. Fires alert if spend exceeds configured threshold (default: +20% and >$100). |
+| `trackSavings` | 5 min | Checks for cost drops >30% vs prior period. Records a savings event and fires an info alert. |
+| `sendAlerts` | 30 sec | Dispatches pending alerts to all configured channels (webhook, email, dashboard). |
+
+### Configuring Alert Rules
+
+By default, alerts fire for any model with a 20%+ spend increase that exceeds $100 absolute. Create per-model rules via **POST** `/api/monitoring/rules`:
+
+```json
+{
+  "model": "gpt-4o",
+  "pct_threshold": 15,
+  "abs_threshold": 200,
+  "period": "7d",
+  "webhook_url": "https://hooks.slack.com/services/...",
+  "email_to": "admin@company.com"
+}
+```
+
+Use `"model": "*"` for a catch-all rule. List, update, and delete rules via `/api/monitoring/rules`.
+
+### Alert Channels
+
+- **Dashboard UI** — Toast notifications appear in the top-right corner (auto-dismiss 30s). Active alerts show in a banner panel with acknowledge buttons.
+- **Webhook** — Signed POST to configured URL (HMAC-SHA256, same pattern as budget webhooks).
+- **Email** — Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `FROM_ADDR` env vars. Supports port 465 (TLS) and 587/25 (STARTTLS). Optional SendGrid upgrade via `SENDGRID_API_KEY`.
+
+### Savings Detection
+
+Every 5 minutes, the engine compares each model's current 7-day cost against the prior 7-day cost. If a drop of 30%+ is detected (and no savings event was recorded in the last 7 days), it:
+
+1. Creates a `savings_event` with the detected amount and confidence level
+2. Fires an info alert: "Savings detected on [model]: $X/mo (Y% drop)"
+3. Records the event in the savings tracking table
+
+View savings events via **GET** `/api/monitoring/savings`. View per-model cost trends via **GET** `/api/monitoring/trends/{model}?period=30d`.
+
+### Alert Lifecycle
+
+1. Engine detects condition → alert created (30-min cooldown prevents duplicates)
+2. `sendAlerts` dispatches to all channels within 30 seconds
+3. User can **acknowledge** (removes from active view) or **dismiss** (permanently hides)
+4. Alerts persist in the database for audit/history
+
+---
+
 ## Quick Troubleshooting
 
 | Symptom | Check |

@@ -6,6 +6,44 @@
 
 TokenSentinel is an enterprise-grade AI gateway that governs every token, every route, and every cost — autonomously. Built with a polyglot architecture where each service speaks the language best suited to its job.
 
+## Deploy in 5 Minutes
+
+```bash
+# 1. Clone
+git clone https://github.com/Tejas163/TokenSentinel.git
+cd TokenSentinel
+
+# 2. Start everything (6 services, one command)
+docker compose -f proxyops_gateway/docker-compose.yml up -d --build
+
+# 3. Verify it's running
+docker compose -f proxyops_gateway/docker-compose.yml ps
+
+# 4. Add a route (point traffic at your AI provider)
+docker compose exec redis redis-cli SET routes:/chat '{"pattern":"/chat","providers":[{"url":"https://api.openai.com/v1/chat/completions","model":"gpt-4","weight":3,"timeout":30}]}'
+
+# 5. Open the cost dashboard
+open http://localhost:3001
+
+# 6. Send your first proxied request
+curl -X POST http://localhost:3000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"Hello from TokenSentinel"}]}'
+```
+
+That's it. The dashboard shows costs per model, per team, per time period — live.
+
+## Why TokenSentinel?
+
+| Problem | TokenSentinel Solution |
+|---------|----------------------|
+| **No cost visibility** | Every request records model + token usage. CFO-ready dashboard with breakdowns by model and time period. |
+| **Provider lock-in** | Weighted random routing across providers. Add/remove upstreams without code changes. |
+| **Expensive failures** | Circuit breaker (5 failures → 30s cooldown), retry with exponential backoff + jitter. |
+| **Enterprise integration** | Spring Boot Starter with auto-configuration, Micrometer metrics, typed Java clients. |
+
+## Architecture
+
 ```
 ┌──────────────┐    ┌──────────────────┐    ┌──────────────────┐
 │  Rust        │───▶│  Go              │───▶│  Upstream        │
@@ -25,17 +63,6 @@ TokenSentinel is an enterprise-grade AI gateway that governs every token, every 
                       └─────────────────┘    └──────────────────┘
 ```
 
-## Why TokenSentinel?
-
-| Problem | TokenSentinel Solution |
-|---------|----------------------|
-| **No cost visibility** | Every request records model + token usage. CFO-ready dashboard with breakdowns by model and time period. |
-| **Provider lock-in** | Weighted random routing across providers. Add/remove upstreams without code changes. |
-| **Expensive failures** | Circuit breaker (5 failures → 30s cooldown), retry with exponential backoff + jitter. |
-| **Enterprise integration** | Spring Boot Starter with auto-configuration, Micrometer metrics, typed Java clients. |
-
-## Architecture
-
 **5 modules, 5 languages — each chosen for the job:**
 
 | Module | Language | Responsibility |
@@ -50,28 +77,6 @@ TokenSentinel is an enterprise-grade AI gateway that governs every token, every 
 - **Redis** — Shared state: rate limits (`ratelimit:{key}`), routes (`routes:{pattern}`), health (`health:{service}`), cost events (`sentinel:{request_id}:cost`)
 - **SQLite** — Persistent cost history for the dashboard
 - **Pub/sub** — `health:events` channel for real-time cost ingestion
-
-## Quick Start
-
-```bash
-# Start all services
-docker compose -f proxyops_gateway/docker-compose.yml up -d --build
-
-# Verify everything is running
-docker compose -f proxyops_gateway/docker-compose.yml ps
-
-# Run end-to-end validation
-./deploy/run-e2e.sh
-```
-
-**Services:**
-
-| Service | Port | URL |
-|---------|------|-----|
-| Rust Proxy | 3000 | `http://localhost:3000/health` |
-| Go Router | 8080 | `http://localhost:8080/health` |
-| Cost Dashboard | 3001 | `http://localhost:3001/` |
-| Redis | 6379 | `redis://localhost:6379` |
 
 ## E2E Verification
 

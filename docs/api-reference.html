@@ -154,6 +154,154 @@ data: {"type": "anomaly", "model": "gpt-4o", "score": 4.2, "threshold": 3.0}</co
         <tr><td><code>X-Rate-Remaining</code></td><td>Remaining requests in current rate-limit window</td></tr>
         <tr><td><code>X-Authenticated-User</code></td><td>Authenticated user identity (internal)</td></tr>
       </table>
+
+      <h2>Prescriptive Engine Endpoints</h2>
+      <p>Base URL: <code>http://localhost:3001</code></p>
+      <p>All prescriptive endpoints require authentication via <code>X-Api-Key</code> or <code>Authorization: Bearer &lt;key&gt;</code>.</p>
+
+      <h3>Assessments</h3>
+
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/prescriptive/assessments</span></div>
+      <p>List all prescriptive assessments.</p>
+
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/prescriptive/assessments</span></div>
+      <p>Create a new assessment. Accepts JSON body with cloud infrastructure details and team composition.</p>
+      <pre><code>{
+  "company_name": "My Company",
+  "cloud_vendor": "aws",
+  "gpu_configs": [{"type": "A100", "count": 8, "region": "us-east-1", "hourly_price": 3.50, "reserved": true}],
+  "monthly_request_volume": 1000000,
+  "token_distribution": {"input_pct": 0.7, "output_pct": 0.3},
+  "current_monthly_spend": 12000,
+  "providers_used": [
+    {"name": "openai", "models": ["gpt-4o", "gpt-4o-mini"], "monthly_spend": 7000}
+  ],
+  "team_composition": {"developers": 20, "platform_engineers": 2, "devops": 1, "management": 2},
+  "source": "manual"
+}</code></pre>
+
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/prescriptive/assessments/{id}</span></div>
+      <p>Get a specific assessment by ID.</p>
+
+      <div class="endpoint"><span class="method put">PUT</span><span class="path">/api/prescriptive/assessments/{id}</span></div>
+      <p>Update an assessment. Creates a new version.</p>
+
+      <div class="endpoint"><span class="method delete">DELETE</span><span class="path">/api/prescriptive/assessments/{id}</span></div>
+      <p>Delete an assessment and all associated data.</p>
+
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/prescriptive/assessments/{id}/versions</span></div>
+      <p>List all versions of an assessment.</p>
+
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/prescriptive/assessments/{id}/versions/{version}</span></div>
+      <p>Get a specific version snapshot.</p>
+
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/prescriptive/assessments/{id}/run</span></div>
+      <p>Run the prescriptive engine on an assessment. Generates cost breakdown, recommendations, and ROI projections. Stores results in the database.</p>
+
+      <h3>Reports</h3>
+
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/prescriptive/report/{id}</span></div>
+      <p>Returns the assessment report. Serves an interactive HTML page when accessed from a browser, or JSON when accessed via API (based on Accept header).</p>
+
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/prescriptive/report/{id}/csv</span></div>
+      <p>Download the report as CSV with cost breakdown and recommendations.</p>
+
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/prescriptive/report/{id}/pdf</span></div>
+      <p>Download the report as a PDF document with executive summary, cost breakdown table, and top recommendations.</p>
+
+      <h3>What-If Simulator</h3>
+
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/prescriptive/what-if/{id}</span></div>
+      <p>Run a what-if scenario on an existing assessment. Accepts adjustment parameters in the request body:</p>
+      <pre><code>{
+  "volume_multiplier": 1.5,
+  "input_pct": 0.6
+}</code></pre>
+      <p>Returns recalculated cost projections based on the adjustments.</p>
+
+      <h3>CSV Import</h3>
+
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/prescriptive/import/csv</span></div>
+      <p>Import cost data from a provider CSV. Supports two modes:</p>
+      <p><strong>JSON mode:</strong> Send a JSON body with column mapping configuration and CSV data as raw text.</p>
+      <p><strong>Multipart mode:</strong> Send a multipart form with the CSV file and column mapping as form fields.</p>
+      <pre><code># Multipart form fields:
+#   file              — The CSV file
+#   assessment_id     — Target assessment ID (optional)
+#   has_header        — "true" or "false"
+#   model_column      — Column index for model name (0-based)
+#   input_tokens_column  — Column index for input tokens
+#   output_tokens_column — Column index for output tokens
+#   cost_column       — Column index for cost (optional)
+</code></pre>
+
+      <h3>Starter Templates</h3>
+
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/prescriptive/templates</span></div>
+      <p>Returns three pre-built starter templates: "Startup", "Mid-size", and "Enterprise". Each template includes pre-filled assessment data that can be used to seed a new assessment.</p>
+
+      <h2>Report Page</h2>
+      <p>Navigate to <code>/api/prescriptive/report/{id}</code> in a browser to view the interactive report page with:</p>
+      <ul>
+        <li>Executive Summary with current/projected spend and savings rate</li>
+        <li>Cost Breakdown table by model with team drill-down toggle</li>
+        <li>Recommendations sorted by priority (high/medium/low)</li>
+        <li>What-If Simulator with sliders for request volume and input token ratio</li>
+        <li>Version History with version comparison</li>
+        <li>CSV and PDF download buttons</li>
+      </ul>
+
+      <h2>Continuous Optimization Endpoints</h2>
+      <p>Base URL: <code>http://localhost:3001</code></p>
+      <p>All monitoring endpoints require authentication via <code>X-Api-Key</code> or <code>Authorization: Bearer &lt;key&gt;</code>.</p>
+
+      <h3>Monitoring Rules</h3>
+      <p>Configure spend threshold alerts per model. Runs every 5 minutes.</p>
+
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/monitoring/rules</span></div>
+      <p>List all monitoring rules.</p>
+
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/monitoring/rules</span></div>
+      <p>Create a monitoring rule.</p>
+      <pre><code>{
+  "model": "gpt-4o",
+  "pct_threshold": 20,
+  "abs_threshold": 100,
+  "period": "7d",
+  "enabled": true,
+  "webhook_url": "https://hooks.slack.com/...",
+  "email_to": "admin@company.com"
+}</code></pre>
+
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/monitoring/rules/{id}</span></div>
+      <p>Get a monitoring rule.</p>
+
+      <div class="endpoint"><span class="method put">PUT</span><span class="path">/api/monitoring/rules/{id}</span></div>
+      <p>Update a monitoring rule.</p>
+
+      <div class="endpoint"><span class="method delete">DELETE</span><span class="path">/api/monitoring/rules/{id}</span></div>
+      <p>Delete a monitoring rule.</p>
+
+      <h3>Alerts</h3>
+
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/monitoring/alerts</span></div>
+      <p>List alerts. Filter with query params: <code>?unacknowledged=true</code>, <code>?model=gpt-4o</code>, <code>?type=spend_spike</code>.</p>
+
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/monitoring/alerts/{id}/acknowledge</span></div>
+      <p>Mark an alert as acknowledged (removes from active view).</p>
+
+      <div class="endpoint"><span class="method post">POST</span><span class="path">/api/monitoring/alerts/{id}/dismiss</span></div>
+      <p>Dismiss an alert permanently.</p>
+
+      <h3>Savings Tracking</h3>
+
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/monitoring/savings</span></div>
+      <p>List auto-detected savings events. The engine detects cost drops >30% vs prior period and records them as savings.</p>
+
+      <h3>Cost Trends</h3>
+
+      <div class="endpoint"><span class="method get">GET</span><span class="path">/api/monitoring/trends/{model}?period=7d</span></div>
+      <p>Daily cost time-series for a specific model. Used for building cost trend charts.</p>
     </div>
   </main>
 </body>

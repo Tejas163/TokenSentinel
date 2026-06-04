@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TokenSentinel — Assessments</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; padding: 2rem; }
+  h1 { color: #38bdf8; margin-bottom: 1.5rem; font-size: 1.75rem; }
+  h2 { color: #38bdf8; font-size: 1.25rem; margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 1px solid #334155; }
+  h3 { color: #94a3b8; font-size: 1rem; margin-bottom: 0.75rem; }
+  .nav { display: flex; gap: 0.5rem; margin-bottom: 2rem; flex-wrap: wrap; }
+  .nav a { color: #94a3b8; text-decoration: none; padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.875rem; border: 1px solid #334155; }
+  .nav a:hover, .nav a.active { background: #1e293b; color: #f8fafc; border-color: #38bdf8; }
+  .card { background: #1e293b; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; border: 1px solid #334155; }
+  .form-group { margin-bottom: 1.25rem; }
+  .form-group label { display: block; color: #94a3b8; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.4rem; }
+  .form-group input, .form-group select { width: 100%; padding: 0.6rem 0.75rem; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 0.9rem; outline: none; }
+  .form-group input:focus, .form-group select:focus { border-color: #38bdf8; }
+  .form-group input[type="number"] { -moz-appearance: textfield; }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
+  .form-row-4 { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 1rem; }
+  .btn { display: inline-block; padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.875rem; cursor: pointer; border: 1px solid #334155; background: #1e293b; color: #e2e8f0; text-decoration: none; margin-right: 0.5rem; }
+  .btn:hover { background: #334155; }
+  .btn-primary { background: #38bdf8; color: #0f172a; border-color: #38bdf8; font-weight: 600; }
+  .btn-primary:hover { background: #7dd3fc; }
+  .btn-danger { background: #7f1d1d; color: #fca5a5; border-color: #dc2626; }
+  .btn-danger:hover { background: #991b1b; }
+  .btn-sm { padding: 0.35rem 0.75rem; font-size: 0.8rem; }
+  .template-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+  .template-card { background: #0f172a; border-radius: 8px; padding: 1.25rem; border: 1px solid #334155; cursor: pointer; transition: border-color 0.15s; }
+  .template-card:hover { border-color: #475569; }
+  .template-card.selected { border-color: #38bdf8; box-shadow: 0 0 0 1px #38bdf8; }
+  .template-card h3 { color: #f8fafc; font-size: 1rem; margin-bottom: 0.4rem; }
+  .template-card p { color: #64748b; font-size: 0.8rem; }
+  .template-card .spend { color: #38bdf8; font-size: 1.1rem; font-weight: 600; margin-top: 0.5rem; }
+  .sub-row { background: #0f172a; border-radius: 6px; padding: 1rem; margin-bottom: 0.75rem; border: 1px solid #334155; }
+  .sub-row .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
+  .sub-row .header span { color: #94a3b8; font-size: 0.85rem; font-weight: 600; }
+  .inline-flex { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+  .slider-group { margin-bottom: 1rem; }
+  .slider-group label { display: flex; justify-content: space-between; color: #94a3b8; font-size: 0.875rem; margin-bottom: 0.3rem; }
+  .slider-group input[type="range"] { width: 100%; height: 6px; -webkit-appearance: none; background: #334155; border-radius: 3px; outline: none; }
+  .slider-group input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: #38bdf8; cursor: pointer; }
+  .hidden { display: none; }
+  .loading { color: #64748b; text-align: center; padding: 2rem; }
+  .success-msg { background: #14532d; color: #86efac; border: 1px solid #22c55e; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+  .error-msg { background: #7f1d1d; color: #fca5a5; border: 1px solid #dc2626; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; padding: 0.75rem 0.5rem; color: #64748b; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #334155; }
+  td { padding: 0.75rem 0.5rem; border-bottom: 1px solid #1e293b; font-size: 0.85rem; }
+  tr:hover td { background: #0f172a; }
+  .status-badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600; }
+  .status-ready { background: #14532d; color: #86efac; }
+  .status-pending { background: #713f12; color: #fde68a; }
+</style>
+</head>
+<body data-api-key="{{index . "APIKey"}}">
+<h1>&#9632; TokenSentinel — Assessments</h1>
+<div class="nav">
+  <a href="/">Home</a>
+  <a href="/dashboard">Dashboard</a>
+  <a href="/assessments" class="active">Assessments</a>
+</div>
+
+<div id="existing-assessments" class="card">
+  <h2>Existing Assessments</h2>
+  <div id="assessments-list" class="loading">Loading...</div>
+</div>
+
+<div class="card">
+  <h2>New Assessment</h2>
+  <div id="template-section">
+    <h3>Start from a template</h3>
+    <div class="template-grid" id="template-grid"></div>
+    <p style="color:#64748b;font-size:0.85rem;margin-bottom:1.5rem;">Select a template to pre-fill the form, or fill in manually.</p>
+  </div>
+
+  <form id="assessment-form" onsubmit="return submitAssessment(event)">
+    <div class="form-row">
+      <div class="form-group">
+        <label>Company Name</label>
+        <input type="text" id="company-name" placeholder="e.g. Acme Corp" required>
+      </div>
+      <div class="form-group">
+        <label>Cloud Vendor</label>
+        <select id="cloud-vendor">
+          <option value="aws">AWS</option>
+          <option value="azure">Azure</option>
+          <option value="gcp">GCP</option>
+          <option value="openai">OpenAI</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Monthly Spend ($)</label>
+        <input type="number" id="monthly-spend" min="0" step="0.01" placeholder="e.g. 18500" required>
+      </div>
+      <div class="form-group">
+        <label>Monthly Request Volume</label>
+        <input type="number" id="request-volume" min="0" placeholder="e.g. 500000" required>
+      </div>
+    </div>
+
+    <h3>Providers Used</h3>
+    <div id="providers-container"></div>
+    <button type="button" class="btn btn-sm" onclick="addProvider()">+ Add Provider</button>
+
+    <h3 style="margin-top:1.5rem;">GPU Configurations</h3>
+    <div id="gpu-container"></div>
+    <button type="button" class="btn btn-sm" onclick="addGPU()">+ Add GPU</button>
+
+    <h3 style="margin-top:1.5rem;">Team Composition</h3>
+    <div class="form-row-4">
+      <div class="form-group"><label>Developers</label><input type="number" id="team-devs" min="0" value="0"></div>
+      <div class="form-group"><label>Platform Engineers</label><input type="number" id="team-pe" min="0" value="0"></div>
+      <div class="form-group"><label>DevOps</label><input type="number" id="team-devops" min="0" value="0"></div>
+      <div class="form-group"><label>Management</label><input type="number" id="team-mgmt" min="0" value="0"></div>
+    </div>
+
+    <h3>Token Distribution</h3>
+    <div class="form-row">
+      <div class="slider-group">
+        <label><span>Input Tokens</span><span id="input-pct-label">70%</span></label>
+        <input type="range" id="input-pct" min="10" max="90" value="70" oninput="updateTokenLabels()">
+      </div>
+      <div class="slider-group">
+        <label><span>Output Tokens</span><span id="output-pct-label">30%</span></label>
+        <input type="range" id="output-pct" min="10" max="90" value="30" disabled style="opacity:0.6;">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Source</label>
+      <select id="source">
+        <option value="manual">Manual</option>
+        <option value="live">Live (use gateway cost data)</option>
+      </select>
+    </div>
+
+    <div id="form-status" class="hidden"></div>
+
+    <button type="submit" class="btn btn-primary" id="submit-btn">Create Assessment & Run</button>
+  </form>
+</div>
+
+<script>
+const API_KEY = document.body.getAttribute('data-api-key');
+var providerIdx = 0;
+var gpuIdx = 0;
+var templates = [];
+
+document.addEventListener('DOMContentLoaded', function() {
+  loadTemplates();
+  loadAssessments();
+  addProvider();
+});
+
+function updateTokenLabels() {
+  var inp = parseInt(document.getElementById('input-pct').value);
+  document.getElementById('input-pct-label').textContent = inp + '%';
+  document.getElementById('output-pct-label').textContent = (100 - inp) + '%';
+}
+
+async function loadTemplates() {
+  try {
+    var r = await fetch('/api/prescriptive/templates', {headers:{'X-Api-Key':API_KEY}});
+    templates = await r.json();
+    var grid = document.getElementById('template-grid');
+    grid.innerHTML = templates.map(function(t, i) {
+      return '<div class="template-card" onclick="selectTemplate(' + i + ')" id="tpl-' + i + '">' +
+        '<h3>' + t.name + '</h3>' +
+        '<p>' + t.description + '</p>' +
+        '<div class="spend">$' + t.assessment.current_monthly_spend.toLocaleString() + '/mo</div>' +
+        '</div>';
+    }).join('');
+  } catch (e) {}
+}
+
+function selectTemplate(idx) {
+  document.querySelectorAll('.template-card').forEach(function(el) { el.classList.remove('selected'); });
+  document.getElementById('tpl-' + idx).classList.add('selected');
+  var t = templates[idx].assessment;
+  document.getElementById('company-name').value = t.company_name;
+  document.getElementById('cloud-vendor').value = t.cloud_vendor || 'aws';
+  document.getElementById('monthly-spend').value = t.current_monthly_spend;
+  document.getElementById('request-volume').value = t.monthly_request_volume;
+
+  document.getElementById('providers-container').innerHTML = '';
+  providerIdx = 0;
+  if (t.providers_used) {
+    t.providers_used.forEach(function(p) { addProvider(p.name, p.models, p.monthly_spend); });
+  }
+
+  document.getElementById('gpu-container').innerHTML = '';
+  gpuIdx = 0;
+  if (t.gpu_configs) {
+    t.gpu_configs.forEach(function(g) { addGPU(g.type, g.count, g.region, g.hourly_price, g.reserved); });
+  }
+
+  if (t.team_composition) {
+    document.getElementById('team-devs').value = t.team_composition.developers || 0;
+    document.getElementById('team-pe').value = t.team_composition.platform_engineers || 0;
+    document.getElementById('team-devops').value = t.team_composition.devops || 0;
+    document.getElementById('team-mgmt').value = t.team_composition.management || 0;
+  }
+
+  if (t.token_distribution) {
+    var pct = Math.round((t.token_distribution.input_pct || 0.7) * 100);
+    document.getElementById('input-pct').value = pct;
+    updateTokenLabels();
+  }
+
+  document.getElementById('source').value = t.source || 'manual';
+}
+
+function addProvider(name, models, spend) {
+  var i = providerIdx++;
+  var container = document.getElementById('providers-container');
+  var div = document.createElement('div');
+  div.className = 'sub-row';
+  div.id = 'provider-' + i;
+  div.innerHTML =
+    '<div class="header"><span>Provider #' + (i + 1) + '</span><button type="button" class="btn btn-sm btn-danger" onclick="removeRow(\'provider-' + i + '\')">Remove</button></div>' +
+    '<div class="form-row-3">' +
+      '<div class="form-group"><label>Name</label><input type="text" id="prov-name-' + i + '" placeholder="e.g. openai" value="' + (name || '') + '" required></div>' +
+      '<div class="form-group"><label>Models (comma-separated)</label><input type="text" id="prov-models-' + i + '" placeholder="gpt-4o, gpt-4o-mini" value="' + ((models || []).join(', ')) + '" required></div>' +
+      '<div class="form-group"><label>Monthly Spend ($)</label><input type="number" id="prov-spend-' + i + '" min="0" step="0.01" placeholder="e.g. 9500" value="' + (spend || '') + '" required></div>' +
+    '</div>';
+  container.appendChild(div);
+}
+
+function addGPU(type, count, region, price, reserved) {
+  var i = gpuIdx++;
+  var container = document.getElementById('gpu-container');
+  var div = document.createElement('div');
+  div.className = 'sub-row';
+  div.id = 'gpu-' + i;
+  var checked = reserved ? 'checked' : '';
+  div.innerHTML =
+    '<div class="header"><span>GPU #' + (i + 1) + '</span><button type="button" class="btn btn-sm btn-danger" onclick="removeRow(\'gpu-' + i + '\')">Remove</button></div>' +
+    '<div class="form-row-4">' +
+      '<div class="form-group"><label>Type</label><input type="text" id="gpu-type-' + i + '" placeholder="A100" value="' + (type || '') + '"></div>' +
+      '<div class="form-group"><label>Count</label><input type="number" id="gpu-count-' + i + '" min="0" value="' + (count || '') + '"></div>' +
+      '<div class="form-group"><label>Region</label><input type="text" id="gpu-region-' + i + '" placeholder="us-east-1" value="' + (region || '') + '"></div>' +
+      '<div class="form-group"><label>Hourly Price ($)</label><input type="number" id="gpu-price-' + i + '" min="0" step="0.01" placeholder="3.50" value="' + (price || '') + '"></div>' +
+    '</div>' +
+    '<div class="form-group" style="margin-bottom:0;"><label style="display:inline;margin-right:0.75rem;">Reserved</label><input type="checkbox" id="gpu-reserved-' + i + '" ' + checked + ' style="width:auto;"></div>';
+  container.appendChild(div);
+}
+
+function removeRow(id) {
+  var el = document.getElementById(id);
+  if (el) el.remove();
+}
+
+async function loadAssessments() {
+  try {
+    var r = await fetch('/api/prescriptive/assessments', {headers:{'X-Api-Key':API_KEY}});
+    var list = await r.json();
+    var container = document.getElementById('assessments-list');
+    if (!list || list.length === 0) {
+      container.innerHTML = '<p style="color:#64748b;">No assessments yet. Create one below.</p>';
+      return;
+    }
+    var html = '<table><thead><tr><th>ID</th><th>Company</th><th>Spend</th><th>Volume</th><th>Source</th><th>Version</th><th>Created</th><th></th></tr></thead><tbody>';
+    list.forEach(function(a) {
+      html += '<tr>' +
+        '<td>' + a.id + '</td>' +
+        '<td>' + a.company_name + '</td>' +
+        '<td>$' + a.current_monthly_spend.toLocaleString() + '</td>' +
+        '<td>' + (a.monthly_request_volume || 0).toLocaleString() + '</td>' +
+        '<td><span class="status-badge ' + (a.source === 'live' ? 'status-ready' : 'status-pending') + '">' + a.source + '</span></td>' +
+        '<td>v' + a.version + '</td>' +
+        '<td>' + new Date(a.created_at).toLocaleDateString() + '</td>' +
+        '<td><a href="/api/prescriptive/report/' + a.id + '" class="btn btn-sm" target="_blank">View Report</a></td>' +
+        '</tr>';
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+  } catch (e) {
+    document.getElementById('assessments-list').innerHTML = '<p style="color:#fca5a5;">Failed to load assessments. Is the API key set?</p>';
+  }
+}
+
+async function submitAssessment(e) {
+  e.preventDefault();
+  var statusEl = document.getElementById('form-status');
+  statusEl.className = 'hidden';
+  var btn = document.getElementById('submit-btn');
+  btn.disabled = true;
+  btn.textContent = 'Creating...';
+
+  var providers = [];
+  document.querySelectorAll('#providers-container .sub-row').forEach(function(row) {
+    var idx = row.id.replace('provider-', '');
+    var name = document.getElementById('prov-name-' + idx);
+    var modelsStr = document.getElementById('prov-models-' + idx);
+    var spend = document.getElementById('prov-spend-' + idx);
+    if (name && modelsStr && spend && name.value) {
+      providers.push({
+        name: name.value,
+        models: modelsStr.value.split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s; }),
+        monthly_spend: parseFloat(spend.value) || 0
+      });
+    }
+  });
+
+  var gpus = [];
+  document.querySelectorAll('#gpu-container .sub-row').forEach(function(row) {
+    var idx = row.id.replace('gpu-', '');
+    var type = document.getElementById('gpu-type-' + idx);
+    var count = document.getElementById('gpu-count-' + idx);
+    var region = document.getElementById('gpu-region-' + idx);
+    var price = document.getElementById('gpu-price-' + idx);
+    var reserved = document.getElementById('gpu-reserved-' + idx);
+    if (type && type.value) {
+      gpus.push({
+        type: type.value,
+        count: parseInt(count ? count.value : 0) || 0,
+        region: region ? region.value : '',
+        hourly_price: parseFloat(price ? price.value : 0) || 0,
+        reserved: reserved ? reserved.checked : false
+      });
+    }
+  });
+
+  var inputPct = parseInt(document.getElementById('input-pct').value) / 100;
+
+  var payload = {
+    company_name: document.getElementById('company-name').value,
+    cloud_vendor: document.getElementById('cloud-vendor').value,
+    current_monthly_spend: parseFloat(document.getElementById('monthly-spend').value) || 0,
+    monthly_request_volume: parseInt(document.getElementById('request-volume').value) || 0,
+    providers_used: providers,
+    gpu_configs: gpus,
+    token_distribution: { input_pct: inputPct, output_pct: 1 - inputPct },
+    team_composition: {
+      developers: parseInt(document.getElementById('team-devs').value) || 0,
+      platform_engineers: parseInt(document.getElementById('team-pe').value) || 0,
+      devops: parseInt(document.getElementById('team-devops').value) || 0,
+      management: parseInt(document.getElementById('team-mgmt').value) || 0
+    },
+    source: document.getElementById('source').value
+  };
+
+  try {
+    var r = await fetch('/api/prescriptive/assessments', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json', 'X-Api-Key':API_KEY},
+      body: JSON.stringify(payload)
+    });
+    if (!r.ok) throw new Error('Create failed: ' + (await r.text()));
+    var assessment = await r.json();
+    var aid = assessment.id;
+
+    statusEl.className = 'success-msg';
+    statusEl.textContent = 'Assessment #' + aid + ' created. Running prescriptive engine...';
+
+    var r2 = await fetch('/api/prescriptive/assessments/' + aid + '/run', {
+      method: 'POST',
+      headers: {'X-Api-Key':API_KEY}
+    });
+    if (!r2.ok) throw new Error('Run failed: ' + (await r2.text()));
+
+    statusEl.innerHTML = 'Assessment #' + aid + ' complete! <a href="/api/prescriptive/report/' + aid + '" style="color:#38bdf8;" target="_blank">View Report &rarr;</a>';
+    loadAssessments();
+  } catch (e) {
+    statusEl.className = 'error-msg';
+    statusEl.textContent = 'Error: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Create Assessment & Run';
+  }
+  return false;
+}
+</script>
+</body>
+</html>

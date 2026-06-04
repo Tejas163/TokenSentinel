@@ -1,31 +1,44 @@
 # TokenSentinel Demo
 
-A self-contained interactive demo showcasing TokenSentinel's core features.
+Self-contained demos showcasing TokenSentinel's core features.
 
-## Quick Start
+## Quick Start (Basic)
 
 ```powershell
-# From project root:
 .\demo\demo.ps1
 ```
 
-The demo will:
-1. Verify all services are running
-2. Inject realistic multi-model cost data (gpt-4, claude-3-opus, gpt-3.5-turbo, gemini-pro)
-3. Query the cost dashboard API
-4. Open the HTML dashboard in your browser
-5. Show cost breakdowns by model
-6. Test the route resolution system
-7. Print a summary report
+Verifies services, injects sample traffic, queries dashboard, tests routes.
+
+## End-to-End Demo (Full)
+
+```powershell
+.\demo\end-to-end.ps1
+```
+
+Demonstrates the complete pipeline across 12 phases:
+
+| Phase | What it shows |
+|-------|---------------|
+| 1 | Environment check (Redis, 3 services) |
+| 2 | Inject 15 realistic cost records across 7 models and 4 teams |
+| 3 | Create a prescriptive assessment (cloud infra + team + spend) |
+| 4 | Run the prescriptive engine → cost breakdown + recommendations + ROI |
+| 5 | Fetch report JSON endpoint |
+| 6 | CSV + PDF report exports |
+| 7 | What-If simulator (50% volume increase) |
+| 8 | Starter templates (Startup, Mid-size, Enterprise) |
+| 9 | Monitoring rule creation + spend spike injection + alert detection |
+| 10 | Savings tracking check |
+| 11 | Cost trend data per model |
+| 12 | Version management (update → new version → version history) |
 
 ## Prerequisites
 
-- Docker & Docker Compose
+- Docker & Docker Compose (services must be running)
 - PowerShell 5.1+
 
-## Output
-
-See `demo-results.txt` for sample output from a successful run.
+## Core Demo
 
 ```
 === HEALTH CHECK ===
@@ -34,18 +47,4 @@ See `demo-results.txt` for sample output from a successful run.
   ✅ Rust Proxy      → {"status":"ok"}
   ✅ Erlang Monitor  → Heartbeat: 1780299326
   ✅ Cost Dashboard  → HTTP 200
-
-=== COST SUMMARY (24h) ===
-  Requests:     8
-  Total Tokens: 3,400
-  Unique Models: 4
-
-=== BY MODEL ===
-  claude-3-opus     → 4 req, 2,180 tokens
-  gpt-4             → 3 req, 920 tokens
-  gpt-3.5-turbo     → 1 req, 135 tokens
-  gemini-pro        → 1 req, 180 tokens
-
-=== ROUTE TEST ===
-  ✅ Route stored: /v1/chat/completions
 ```

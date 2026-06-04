@@ -13,7 +13,7 @@ function Pass($m) { Write-Host "  [OK] $m" -ForegroundColor Green }
 function Fail($m) { Write-Host "  [FAIL] $m" -ForegroundColor Red }
 
 function Api($url) {
-    try { return (Invoke-RestMethod -Uri $url -ErrorAction Stop) } catch { return $null }
+    try { return (Invoke-RestMethod -Uri $url -Headers @{"X-Api-Key"="dev-key-123"} -ErrorAction Stop) } catch { return $null }
 }
 
 Heading "TokenSentinel Live Demo"

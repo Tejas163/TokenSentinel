@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TokenSentinel Prescriptive Report</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; padding: 2rem; }
+  h1 { color: #38bdf8; margin-bottom: 0.5rem; font-size: 1.75rem; }
+  h2 { color: #38bdf8; font-size: 1.25rem; margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 1px solid #334155; }
+  h3 { color: #94a3b8; font-size: 1rem; margin-bottom: 0.75rem; }
+  .subtitle { color: #64748b; font-size: 0.875rem; margin-bottom: 2rem; }
+  .nav { display: flex; gap: 0.5rem; margin-bottom: 2rem; flex-wrap: wrap; }
+  .nav a { color: #94a3b8; text-decoration: none; padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.875rem; border: 1px solid #334155; }
+  .nav a:hover { background: #1e293b; color: #f8fafc; }
+  .card { background: #1e293b; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; border: 1px solid #334155; }
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+  .summary-card { background: #0f172a; border-radius: 8px; padding: 1.25rem; border: 1px solid #334155; text-align: center; }
+  .summary-card .value { font-size: 1.75rem; font-weight: 600; color: #f8fafc; }
+  .summary-card .value.green { color: #22c55e; }
+  .summary-card .value.red { color: #ef4444; }
+  .summary-card .value.blue { color: #38bdf8; }
+  .summary-card .label { font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.25rem; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; padding: 0.75rem 0.5rem; color: #64748b; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #334155; }
+  td { padding: 0.75rem 0.5rem; border-bottom: 1px solid #1e293b; font-size: 0.875rem; }
+  tr:hover td { background: #0f172a; }
+  .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; }
+  .badge-high { background: #7f1d1d; color: #fca5a5; }
+  .badge-medium { background: #713f12; color: #fde68a; }
+  .badge-low { background: #1e3a5f; color: #93c5fd; }
+  .slider-group { margin-bottom: 1.5rem; }
+  .slider-group label { display: flex; justify-content: space-between; color: #94a3b8; font-size: 0.875rem; margin-bottom: 0.5rem; }
+  .slider-group input[type="range"] { width: 100%; height: 6px; -webkit-appearance: none; background: #334155; border-radius: 3px; outline: none; }
+  .slider-group input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: #38bdf8; cursor: pointer; }
+  .hidden { display: none; }
+  .tab-bar { display: flex; gap: 0; margin-bottom: 1rem; border-bottom: 1px solid #334155; }
+  .tab-bar button { background: transparent; color: #64748b; border: none; padding: 0.75rem 1.25rem; cursor: pointer; font-size: 0.875rem; border-bottom: 2px solid transparent; }
+  .tab-bar button.active { color: #38bdf8; border-bottom-color: #38bdf8; }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+  .btn { display: inline-block; padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.875rem; cursor: pointer; border: 1px solid #334155; background: #1e293b; color: #e2e8f0; text-decoration: none; margin-right: 0.5rem; }
+  .btn:hover { background: #334155; }
+  .btn-primary { background: #38bdf8; color: #0f172a; border-color: #38bdf8; font-weight: 600; }
+  .btn-primary:hover { background: #7dd3fc; }
+  .loading { color: #64748b; text-align: center; padding: 3rem; font-size: 1rem; }
+  .error { color: #fca5a5; text-align: center; padding: 2rem; }
+  .rec-card { padding: 1rem; margin-bottom: 0.75rem; border-radius: 6px; border: 1px solid #334155; background: #0f172a; }
+  .rec-card.high { border-left: 3px solid #ef4444; }
+  .rec-card.medium { border-left: 3px solid #f59e0b; }
+  .rec-card.low { border-left: 3px solid #3b82f6; }
+  .rec-card .rec-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+  .rec-card .rec-desc { color: #e2e8f0; font-size: 0.9rem; }
+  .rec-card .rec-meta { color: #64748b; font-size: 0.8rem; margin-top: 0.5rem; }
+  .rec-card .rec-savings { color: #22c55e; font-weight: 600; font-size: 1rem; }
+  .version-picker { margin-bottom: 1rem; }
+  .version-picker select { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; padding: 0.5rem; border-radius: 6px; font-size: 0.875rem; }
+  @media (max-width: 768px) { body { padding: 1rem; } .summary-grid { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body data-api-key="{{index . "APIKey"}}">
+<div id="app">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;">
+    <div>
+      <h1>&#9632; TokenSentinel Prescriptive Report</h1>
+      <div class="subtitle" id="report-subtitle">Loading...</div>
+    </div>
+    <div style="display:flex;gap:0.5rem;margin-bottom:1rem;">
+      <a class="btn" id="csv-download" href="#">&#8595; CSV</a>
+      <a class="btn" id="pdf-download" href="#">&#8595; PDF</a>
+    </div>
+  </div>
+
+  <div class="nav">
+    <a href="#summary">Executive Summary</a>
+    <a href="#breakdown">Cost Breakdown</a>
+    <a href="#recommendations">Recommendations</a>
+    <a href="#whatif">What-If</a>
+    <a href="#versions">Versions</a>
+    <a href="/dashboard" style="margin-left:auto;">Dashboard</a>
+    <a href="/">Home</a>
+  </div>
+
+  <div id="loading" class="loading">Loading report data...</div>
+  <div id="error" class="error hidden"></div>
+
+  <div id="content" class="hidden">
+    <div class="card" id="summary">
+      <h2>Executive Summary</h2>
+      <div class="summary-grid" id="summary-grid"></div>
+      <div id="top-rec"></div>
+    </div>
+
+    <div class="card" id="breakdown">
+      <h2>Cost Breakdown</h2>
+      <div style="margin-bottom:1rem;">
+        <button class="btn" onclick="toggleTeamView()" id="team-toggle">Show Team View</button>
+      </div>
+      <div id="team-view" class="hidden">
+        <div id="team-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:1rem;margin-bottom:1rem;"></div>
+      </div>
+      <table><thead><tr><th>Model</th><th>Provider</th><th>Input (M)</th><th>Output (M)</th><th>Current/Mo</th><th>Projected/Mo</th></tr></thead><tbody id="breakdown-table"></tbody></table>
+    </div>
+
+    <div class="card" id="recommendations">
+      <h2>Recommendations</h2>
+      <div id="rec-list"></div>
+    </div>
+
+    <div class="card" id="whatif">
+      <h2>What-If Simulator</h2>
+      <p style="color:#64748b;font-size:0.875rem;margin-bottom:1rem;">Adjust parameters below to see how changes affect your projected costs. Calculations run client-side.</p>
+      <div class="slider-group">
+        <label>Request Volume <span id="vol-label">100%</span></label>
+        <input type="range" id="vol-slider" min="50" max="150" value="100" oninput="updateWhatIf()">
+      </div>
+      <div class="slider-group">
+        <label>Input Token % <span id="input-label">70%</span></label>
+        <input type="range" id="input-slider" min="30" max="90" value="70" oninput="updateWhatIf()">
+      </div>
+      <div class="summary-grid" id="whatif-grid" style="margin-top:1rem;"></div>
+      <div id="whatif-table-wrapper" style="margin-top:1rem;">
+        <table><thead><tr><th>Model</th><th>Current/Mo</th><th>Projected/Mo</th><th>Change</th></tr></thead><tbody id="whatif-table"></tbody></table>
+      </div>
+    </div>
+
+    <div class="card" id="versions">
+      <h2>Version History</h2>
+      <div class="version-picker">
+        <label style="color:#94a3b8;font-size:0.875rem;margin-right:0.5rem;">Compare:</label>
+        <select id="version-select" onchange="loadVersion()"></select>
+        <button class="btn" onclick="compareVersions()" style="margin-left:0.5rem;">Compare</button>
+      </div>
+      <div id="version-compare"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let reportData = null;
+let whatIfBase = null;
+let assessmentId = null;
+const API_KEY = document.body.getAttribute('data-api-key');
+
+function getAssessmentId() {
+  var parts = window.location.pathname.split('/');
+  for (var i = 0; i < parts.length; i++) {
+    if (parts[i] === 'report' && i + 1 < parts.length) {
+      return parts[i + 1];
+    }
+  }
+  return null;
+}
+
+assessmentId = getAssessmentId();
+
+async function loadReport() {
+  if (!assessmentId) {
+    document.getElementById('error').textContent = 'Invalid report ID';
+    document.getElementById('error').classList.remove('hidden');
+    document.getElementById('loading').classList.add('hidden');
+    return;
+  }
+
+  try {
+    var r = await fetch('/api/prescriptive/report/' + assessmentId, {headers:{'X-Api-Key':API_KEY}});
+    if (!r.ok) throw new Error('Report not found');
+    reportData = await r.json();
+    whatIfBase = JSON.parse(JSON.stringify(reportData));
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('content').classList.remove('hidden');
+    render();
+  } catch (e) {
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('error').textContent = 'Failed to load report: ' + e.message;
+    document.getElementById('error').classList.remove('hidden');
+  }
+}
+
+function render() {
+  var d = reportData;
+  document.getElementById('report-subtitle').textContent = d.assessment.company_name + ' — v' + d.assessment.version;
+  document.getElementById('csv-download').href = '/api/prescriptive/report/' + assessmentId + '/csv';
+  document.getElementById('pdf-download').href = '/api/prescriptive/report/' + assessmentId + '/pdf';
+
+  renderSummary(d);
+  renderBreakdown(d);
+  renderRecommendations(d);
+  renderTeamView();
+  renderWhatIf();
+  loadVersions();
+}
+
+function renderSummary(d) {
+  document.getElementById('summary-grid').innerHTML = [
+    '<div class="summary-card"><div class="value blue">$' + fmt(d.total_current_spend) + '</div><div class="label">Current Monthly Spend</div></div>',
+    '<div class="summary-card"><div class="value green">$' + fmt(d.total_monthly_savings) + '</div><div class="label">Projected Monthly Savings</div></div>',
+    '<div class="summary-card"><div class="value blue">$' + fmt(d.total_projected_spend) + '</div><div class="label">Projected Monthly Spend</div></div>',
+    '<div class="summary-card"><div class="value ' + (d.total_current_spend > 0 ? (d.total_monthly_savings/d.total_current_spend*100 > 20 ? 'green' : 'red') : 'blue') + '">' + (d.total_current_spend > 0 ? (d.total_monthly_savings/d.total_current_spend*100).toFixed(0) + '%' : '-') + '</div><div class="label">Savings Rate</div></div>'
+  ].join('');
+
+  if (d.recommendations && d.recommendations.length > 0) {
+    var top = d.recommendations[0];
+    document.getElementById('top-rec').innerHTML = '<div class="rec-card ' + top.priority + '"><div class="rec-header"><span class="badge badge-' + top.priority + '">' + top.priority + '</span><span class="rec-savings">+$' + fmt(top.monthly_savings) + '/mo</span></div><div class="rec-desc">' + top.description + '</div></div>';
+  }
+}
+
+function renderBreakdown(d) {
+  var tbody = document.getElementById('breakdown-table');
+  if (!d.cost_breakdown || d.cost_breakdown.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="color:#64748b;text-align:center;">Run the assessment to generate cost breakdown</td></tr>';
+    return;
+  }
+  tbody.innerHTML = d.cost_breakdown.map(function(c) {
+    return '<tr>' +
+      '<td>' + c.model + '</td>' +
+      '<td>' + c.provider + '</td>' +
+      '<td>' + c.input_tokens_millions.toFixed(2) + '</td>' +
+      '<td>' + c.output_tokens_millions.toFixed(2) + '</td>' +
+      '<td>$' + fmt(c.current_monthly_cost) + '</td>' +
+      '<td>$' + fmt(c.projected_monthly_cost) + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
+function renderRecommendations(d) {
+  var div = document.getElementById('rec-list');
+  if (!d.recommendations || d.recommendations.length === 0) {
+    div.innerHTML = '<p style="color:#64748b;">No recommendations generated. Try running the assessment with more data.</p>';
+    return;
+  }
+  div.innerHTML = d.recommendations.map(function(r) {
+    return '<div class="rec-card ' + r.priority + '">' +
+      '<div class="rec-header"><span class="badge badge-' + r.priority + '">' + r.priority + '</span><span class="rec-savings">+$' + fmt(r.monthly_savings) + '/mo</span></div>' +
+      '<div class="rec-desc">' + r.description + '</div>' +
+      '<div class="rec-meta">Category: ' + r.category.replace('_', ' ') + ' &middot; Current: $' + fmt(r.current_cost) + ' &middot; Payback: ' + r.payback_period_days + ' days</div>' +
+      '</div>';
+  }).join('');
+}
+
+function renderTeamView() {
+  var tc = reportData.assessment.team_composition;
+  if (!tc) return;
+  var labels = {developers:'Developers',platform_engineers:'Platform Engineers',devops:'DevOps',management:'Management'};
+  document.getElementById('team-grid').innerHTML = Object.keys(tc).map(function(k) {
+    return '<div class="summary-card"><div class="value blue">' + tc[k] + '</div><div class="label">' + (labels[k]||k) + '</div></div>';
+  }).join('');
+}
+
+function renderWhatIf() {
+  updateWhatIf();
+}
+
+function updateWhatIf() {
+  var volPct = parseInt(document.getElementById('vol-slider').value);
+  var inputPct = parseInt(document.getElementById('input-slider').value);
+  document.getElementById('vol-label').textContent = volPct + '%';
+  document.getElementById('input-label').textContent = inputPct + '%';
+
+  if (!whatIfBase || !whatIfBase.cost_breakdown) return;
+
+  var multiplier = volPct / 100;
+  var projections = whatIfBase.cost_breakdown.map(function(c) {
+    var baseInputM = c.input_tokens_millions;
+    var baseOutputM = c.output_tokens_millions;
+    var newInputM = baseInputM * multiplier;
+    var newOutputM = baseOutputM * multiplier;
+    var mi = findModelCost(c.model);
+    var currentCost = c.current_monthly_cost;
+    var projectedCost = currentCost * multiplier;
+    return {
+      model: c.model,
+      current: currentCost,
+      projected: projectedCost,
+      change: projectedCost - currentCost
+    };
+  });
+
+  var totalCurrent = projections.reduce(function(s, p) { return s + p.current; }, 0);
+  var totalProjected = projections.reduce(function(s, p) { return s + p.projected; }, 0);
+  var totalChange = totalProjected - totalCurrent;
+
+  document.getElementById('whatif-grid').innerHTML = [
+    '<div class="summary-card"><div class="value blue">$' + fmt(totalCurrent) + '</div><div class="label">Current</div></div>',
+    '<div class="summary-card"><div class="value ' + (totalChange <= 0 ? 'green' : 'red') + '">$' + fmt(totalProjected) + '</div><div class="label">Projected</div></div>',
+    '<div class="summary-card"><div class="value ' + (totalChange <= 0 ? 'green' : 'red') + '">' + (totalChange >= 0 ? '+' : '') + '$' + fmt(totalChange) + '</div><div class="label">Change</div></div>',
+    '<div class="summary-card"><div class="value blue">' + volPct + '%</div><div class="label">Volume</div></div>'
+  ].join('');
+
+  document.getElementById('whatif-table').innerHTML = projections.map(function(p) {
+    var change = p.projected - p.current;
+    return '<tr>' +
+      '<td>' + p.model + '</td>' +
+      '<td>$' + fmt(p.current) + '</td>' +
+      '<td>$' + fmt(p.projected) + '</td>' +
+      '<td style="color:' + (change <= 0 ? '#22c55e' : '#ef4444') + '">' + (change >= 0 ? '+' : '') + '$' + fmt(change) + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
+function findModelCost(name) {
+  if (!reportData || !reportData.cost_breakdown) return null;
+  for (var i = 0; i < reportData.cost_breakdown.length; i++) {
+    if (reportData.cost_breakdown[i].model === name) return reportData.cost_breakdown[i];
+  }
+  return null;
+}
+
+var teamViewVisible = false;
+function toggleTeamView() {
+  teamViewVisible = !teamViewVisible;
+  document.getElementById('team-view').classList.toggle('hidden', !teamViewVisible);
+  document.getElementById('team-toggle').textContent = teamViewVisible ? 'Show Aggregate View' : 'Show Team View';
+}
+
+async function loadVersions() {
+  try {
+    var r = await fetch('/api/prescriptive/assessments/' + assessmentId + '/versions', {headers:{'X-Api-Key':API_KEY}});
+    var versions = await r.json();
+    var sel = document.getElementById('version-select');
+    sel.innerHTML = versions.map(function(v) {
+      return '<option value="' + v.version_number + '">v' + v.version_number + ' — ' + new Date(v.created_at).toLocaleDateString() + '</option>';
+    }).join('');
+  } catch (e) {}
+}
+
+function loadVersion() {}
+function compareVersions() {
+  document.getElementById('version-compare').innerHTML = '<p style="color:#64748b;">Version comparison overlay coming soon. Select two versions to compare.</p>';
+}
+
+function fmt(v) {
+  if (v >= 1000) return v.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+  return v.toFixed(2);
+}
+
+loadReport();
+</script>
+</body>
+</html>
