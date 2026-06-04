@@ -183,6 +183,7 @@ func main() {
 	mux.HandleFunc("/api/dashboard/events", authMiddleware(handleSSE))
 	mux.HandleFunc("/api/admin/budget-rules", authMiddleware(handleBudgetRules))
 	mux.HandleFunc("/api/admin/teams", authMiddleware(handleTeams))
+	mux.HandleFunc("/api/admin/seed-demo", authMiddleware(handleAdminSeed))
 	mux.HandleFunc("/api/budget/status", authMiddleware(handleBudgetStatus))
 	mux.HandleFunc("/api/prescriptive/report/", handleReportFrontend)
 	mux.HandleFunc("/api/prescriptive/", authMiddleware(handlePrescriptiveRouter))
