@@ -68,5 +68,20 @@ services:
       - REDIS_URL=redis://redis:6379
     restart: unless-stopped
 
+  mcp-gateway:
+    build: ./mcp-gateway
+    ports:
+      - "3010:3010"
+      - "3011:3011"
+    depends_on:
+      - redis
+      - cost-dashboard
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - DASHBOARD_URL=http://cost-dashboard:3001
+      - DASHBOARD_API_KEY=dev-key-123
+      - MCP_API_KEY=dev-key-123
+    restart: unless-stopped
+
 volumes:
   pg-data:
