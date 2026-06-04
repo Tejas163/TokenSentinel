@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"strings"
@@ -12,7 +13,7 @@ import (
 )
 
 func monitorSpendTrends(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(monitoringInterval)
 	defer ticker.Stop()
 	log.Println("monitoring: spend trends goroutine started")
 	for {
@@ -26,7 +27,7 @@ func monitorSpendTrends(ctx context.Context) {
 }
 
 func trackSavings(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(monitoringInterval)
 	defer ticker.Stop()
 	log.Println("monitoring: savings tracking goroutine started")
 	for {
@@ -110,6 +111,7 @@ func queryModelCosts(since string) map[string]float64 {
 		var model string
 		var totalIn, totalOut float64
 		if err := rows.Scan(&model, &totalIn, &totalOut); err != nil {
+			log.Printf("scan model costs: %v", err)
 			continue
 		}
 		cost := (totalIn/1000)*30 + (totalOut/1000)*60
@@ -249,6 +251,7 @@ func dispatchPendingAlerts() {
 		var a Alert
 		var createdAt time.Time
 		if err := rows.Scan(&a.ID, &a.Model, &a.AlertType, &a.Severity, &a.Message, &a.CurrentValue, &a.ThresholdValue, &createdAt); err != nil {
+			log.Printf("scan pending alert: %v", err)
 			continue
 		}
 		dispatchAlert(a)
@@ -259,7 +262,7 @@ func dispatchAlert(a Alert) {
 	rule := getThresholdsForModel(a.Model)
 
 	if rule.WebhookURL != "" && strings.HasPrefix(rule.WebhookURL, "http") {
-		payload, _ := json.Marshal(map[string]interface{}{
+		payload, err := json.Marshal(map[string]interface{}{
 			"type":    a.AlertType,
 			"severity": a.Severity,
 			"model":   a.Model,
@@ -268,11 +271,16 @@ func dispatchAlert(a Alert) {
 			"threshold": a.ThresholdValue,
 			"timestamp": time.Now().UTC().Format(time.RFC3339),
 		})
-		resp, err := signAndPost(rule.WebhookURL, payload)
 		if err != nil {
-			log.Printf("monitoring: webhook dispatch failed for alert %d: %v", a.ID, err)
+			log.Printf("alert webhook marshal: %v", err)
 		} else {
-			resp.Body.Close()
+			resp, err := signAndPost(rule.WebhookURL, payload)
+			if err != nil {
+				log.Printf("monitoring: webhook dispatch failed for alert %d: %v", a.ID, err)
+			} else {
+				io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
+			}
 		}
 	}
 
@@ -280,7 +288,7 @@ func dispatchAlert(a Alert) {
 		sendAlertEmail(rule.EmailTo, a)
 	}
 
-	payload, _ := json.Marshal(map[string]interface{}{
+	payload, err := json.Marshal(map[string]interface{}{
 		"type":    "monitoring_alert",
 		"alert_type": a.AlertType,
 		"severity": a.Severity,
@@ -289,7 +297,11 @@ func dispatchAlert(a Alert) {
 		"current": a.CurrentValue,
 		"threshold": a.ThresholdValue,
 	})
-	events.broad <- sseEvent{Type: "alert", Data: payload}
+	if err != nil {
+		log.Printf("alert SSE marshal: %v", err)
+	} else {
+		events.broadcast(sseEvent{Type: "alert", Data: payload})
+	}
 }
 
 func getTrendData(model, period string) ([]SpendTrendPoint, error) {
@@ -313,6 +325,7 @@ func getTrendData(model, period string) ([]SpendTrendPoint, error) {
 		var day time.Time
 		var totalTokens, totalIn, totalOut float64
 		if err := rows.Scan(&day, &totalTokens, &totalIn, &totalOut); err != nil {
+			log.Printf("scan trend data: %v", err)
 			continue
 		}
 		mi := findModel(model)

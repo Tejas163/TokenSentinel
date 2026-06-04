@@ -139,9 +139,11 @@ func handleAssessmentVersions(w http.ResponseWriter, r *http.Request) {
 }
 
 func listAssessments(w http.ResponseWriter, r *http.Request) {
+	limit := parseIntParam(r, "limit", 100)
+	offset := parseIntParam(r, "offset", 0)
 	rows, err := db.Query(`SELECT id, company_name, cloud_vendor, gpu_configs, monthly_request_volume,
 		token_distribution, current_monthly_spend, providers_used, team_composition, source, version, created_at, updated_at
-		FROM assessments ORDER BY updated_at DESC`)
+		FROM assessments ORDER BY updated_at DESC LIMIT $1 OFFSET $2`, limit, offset)
 	if err != nil {
 		log.Printf("list assessments error: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -156,6 +158,7 @@ func listAssessments(w http.ResponseWriter, r *http.Request) {
 		var createdAt, updatedAt time.Time
 		if err := rows.Scan(&a.ID, &a.CompanyName, &a.CloudVendor, &gpuJSON, &a.MonthlyRequestVolume,
 			&tokenJSON, &a.CurrentMonthlySpend, &providerJSON, &teamJSON, &a.Source, &a.Version, &createdAt, &updatedAt); err != nil {
+			log.Printf("scan assessment: %v", err)
 			continue
 		}
 		json.Unmarshal(gpuJSON, &a.GPUConfigs)
@@ -179,6 +182,14 @@ func createAssessment(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.CompanyName == "" {
 		http.Error(w, "company_name required", http.StatusBadRequest)
+		return
+	}
+	if a.MonthlyRequestVolume < 0 {
+		http.Error(w, "monthly_request_volume must be non-negative", http.StatusBadRequest)
+		return
+	}
+	if a.CurrentMonthlySpend < 0 {
+		http.Error(w, "current_monthly_spend must be non-negative", http.StatusBadRequest)
 		return
 	}
 	if a.Source == "" {
@@ -273,6 +284,14 @@ func updateAssessment(w http.ResponseWriter, r *http.Request, id int) {
 		http.Error(w, "company_name required", http.StatusBadRequest)
 		return
 	}
+	if a.MonthlyRequestVolume < 0 {
+		http.Error(w, "monthly_request_volume must be non-negative", http.StatusBadRequest)
+		return
+	}
+	if a.CurrentMonthlySpend < 0 {
+		http.Error(w, "current_monthly_spend must be non-negative", http.StatusBadRequest)
+		return
+	}
 
 	gpuJSON, _ := json.Marshal(a.GPUConfigs)
 	tokenJSON, _ := json.Marshal(a.TokenDistribution)
@@ -318,8 +337,10 @@ func deleteAssessment(w http.ResponseWriter, r *http.Request, id int) {
 }
 
 func listAssessmentVersions(w http.ResponseWriter, r *http.Request, assessmentID int) {
+	limit := parseIntParam(r, "limit", 50)
+	offset := parseIntParam(r, "offset", 0)
 	rows, err := db.Query(`SELECT id, assessment_id, version_number, snapshot, created_at
-		FROM assessment_versions WHERE assessment_id = $1 ORDER BY version_number DESC`, assessmentID)
+		FROM assessment_versions WHERE assessment_id = $1 ORDER BY version_number DESC LIMIT $2 OFFSET $3`, assessmentID, limit, offset)
 	if err != nil {
 		log.Printf("list versions error: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -332,6 +353,7 @@ func listAssessmentVersions(w http.ResponseWriter, r *http.Request, assessmentID
 		var v AssessmentVersion
 		var createdAt time.Time
 		if err := rows.Scan(&v.ID, &v.AssessmentID, &v.VersionNumber, &v.Snapshot, &createdAt); err != nil {
+			log.Printf("scan assessment version: %v", err)
 			continue
 		}
 		v.CreatedAt = createdAt.Format(time.RFC3339)

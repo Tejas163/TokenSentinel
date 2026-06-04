@@ -15,9 +15,11 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -26,6 +28,30 @@ import (
 
 //go:embed dashboard.html
 var dashboardContent embed.FS
+
+func parseIntParam(r *http.Request, key string, defaultVal int) int {
+	v := r.URL.Query().Get(key)
+	if v == "" {
+		return defaultVal
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return defaultVal
+	}
+	return n
+}
+
+func lookupEnv(key, fallback string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		if fallback == "" {
+			log.Fatalf("required env var %q is not set", key)
+		}
+		log.Printf("env %q not set, using default: %s", key, fallback)
+		return fallback
+	}
+	return v
+}
 
 type sseEvent struct {
 	Type string
@@ -48,6 +74,14 @@ func newSSEBroker() *sseBroker {
 	}
 	go b.run()
 	return b
+}
+
+func (b *sseBroker) broadcast(evt sseEvent) {
+	select {
+	case b.broad <- evt:
+	default:
+		log.Printf("sse: broker channel full, dropping %s event", evt.Type)
+	}
 }
 
 func (b *sseBroker) run() {
@@ -80,12 +114,17 @@ func (b *sseBroker) unsubscribe(ch chan sseEvent) {
 }
 
 var (
-	rdb         *redis.Client
-	db          *sql.DB
-	tmpls       *template.Template
-	authAPIKey  string
-	events      = newSSEBroker()
-	appStore    Store
+	rdb            *redis.Client
+	db             *sql.DB
+	tmpls          *template.Template
+	authAPIKey     string
+	events         = newSSEBroker()
+	appStore       Store
+	anomalyZScore  = 3.0
+
+	monitoringInterval = 5 * time.Minute
+	anomalyInterval    = 5 * time.Minute
+	retentionMaxAge    = 90
 )
 
 type CostEntry struct {
@@ -113,13 +152,39 @@ type BudgetRule struct {
 	Enabled    bool   `json:"enabled"`
 }
 
+type EscalationPolicy struct {
+	ID             int    `json:"id"`
+	Name           string `json:"name"`
+	AlertType      string `json:"alert_type"`
+	Model          string `json:"model"`
+	Severity       string `json:"severity"`
+	TimeoutMinutes int    `json:"timeout_minutes"`
+	WebhookURL     string `json:"webhook_url"`
+	Enabled        bool   `json:"enabled"`
+	CreatedAt      string `json:"created_at"`
+}
+
+type contextKey string
+
+const orgCtxKey contextKey = "org_id"
+
+func getOrgID(r *http.Request) string {
+	if v := r.Context().Value(orgCtxKey); v != nil {
+		return v.(string)
+	}
+	return ""
+}
+
 type AnomalyEntry struct {
-	RequestID   string  `json:"request_id"`
-	Model       string  `json:"model"`
-	TotalTokens int     `json:"total_tokens"`
-	Mean        float64 `json:"mean"`
-	Stddev      float64 `json:"stddev"`
-	ZScore      float64 `json:"z_score"`
+	ID          int       `json:"id,omitempty"`
+	RequestID   string    `json:"request_id"`
+	Model       string    `json:"model"`
+	TotalTokens int       `json:"total_tokens"`
+	Mean        float64   `json:"mean"`
+	Stddev      float64   `json:"stddev"`
+	ZScore      float64   `json:"z_score"`
+	DetectedAt  string    `json:"detected_at,omitempty"`
+	OrgID       string    `json:"org_id,omitempty"`
 }
 
 type ModelCost struct {
@@ -133,18 +198,29 @@ type ModelCost struct {
 }
 
 func main() {
-	redisAddr := os.Getenv("REDIS_ADDR")
-	if redisAddr == "" {
-		redisAddr = "localhost:6379"
+	redisAddr := lookupEnv("REDIS_ADDR", "localhost:6379")
+	dsn := lookupEnv("DATABASE_URL", "postgres://localhost:5432/cost_dashboard?sslmode=disable")
+	port := lookupEnv("PORT", "3001")
+	authAPIKey = lookupEnv("AUTH_API_KEY", "")
+	if v := lookupEnv("ANOMALY_Z_SCORE", "3.0"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			anomalyZScore = f
+		}
 	}
-	rdb = redis.NewClient(&redis.Options{
-		Addr:     redisAddr,
-		Password: os.Getenv("REDIS_PASSWORD"),
-	})
-
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		dsn = "postgres://localhost:5432/cost_dashboard?sslmode=disable"
+	if v := lookupEnv("MONITORING_INTERVAL", "5m"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			monitoringInterval = d
+		}
+	}
+	if v := lookupEnv("ANOMALY_INTERVAL", "5m"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			anomalyInterval = d
+		}
+	}
+	if v := lookupEnv("RETENTION_MAX_DAYS", "90"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			retentionMaxAge = n
+		}
 	}
 
 	var err error
@@ -162,44 +238,84 @@ func main() {
 		log.Fatalf("failed to init monitoring tables: %v", err)
 	}
 
+	rdb = redis.NewClient(&redis.Options{
+		Addr:     redisAddr,
+		Password: os.Getenv("REDIS_PASSWORD"),
+	})
+
 	tmpls = template.Must(template.ParseFS(dashboardContent, "dashboard.html"))
-	authAPIKey = os.Getenv("AUTH_API_KEY")
 	appStore = &pgStore{db: db}
 	initEmailConfig()
 
-	go subscribeCostEvents(context.Background())
-	go monitorSpendTrends(context.Background())
-	go trackSavings(context.Background())
-	go sendAlerts(context.Background())
-	go dataRetention(context.Background())
-	go detectAnomalies(context.Background())
-	go checkBudgets(context.Background())
-	go syncTeamBudgets(context.Background())
-	go costDigest(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go subscribeCostEvents(ctx)
+	go monitorSpendTrends(ctx)
+	go trackSavings(ctx)
+	go sendAlerts(ctx)
+	go dataRetention(ctx)
+	go detectAnomalies(ctx)
+	go checkBudgets(ctx)
+	go syncTeamBudgets(ctx)
+	go costDigest(ctx)
+	go refreshCostSummary(ctx)
+	go monitorAlertsEscalation(ctx)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", authMiddleware(handleDashboardHealth))
-	mux.HandleFunc("/api/dashboard/costs", authMiddleware(handleCosts))
-	mux.HandleFunc("/api/dashboard/summary", authMiddleware(handleSummary))
-	mux.HandleFunc("/api/dashboard/anomalies", authMiddleware(handleAnomalies))
+	mux.HandleFunc("/api/dashboard/costs", orgMiddleware(handleCosts))
+	mux.HandleFunc("/api/dashboard/summary", orgMiddleware(handleSummary))
+	mux.HandleFunc("/api/dashboard/anomalies", orgMiddleware(handleAnomalies))
 	mux.HandleFunc("/api/dashboard/events", authMiddleware(handleSSE))
-	mux.HandleFunc("/api/admin/budget-rules", authMiddleware(handleBudgetRules))
-	mux.HandleFunc("/api/admin/teams", authMiddleware(handleTeams))
+	mux.HandleFunc("/api/admin/budget-rules", orgMiddleware(handleBudgetRules))
+	mux.HandleFunc("/api/admin/teams", orgMiddleware(handleTeams))
 	mux.HandleFunc("/api/admin/seed-demo", authMiddleware(handleAdminSeed))
-	mux.HandleFunc("/api/budget/status", authMiddleware(handleBudgetStatus))
+	mux.HandleFunc("/api/admin/escalation-policies", orgMiddleware(handleEscalationPolicies))
+	mux.HandleFunc("/api/budget/status", orgMiddleware(handleBudgetStatus))
 	mux.HandleFunc("/api/prescriptive/report/", handleReportFrontend)
-	mux.HandleFunc("/api/prescriptive/", authMiddleware(handlePrescriptiveRouter))
-	mux.HandleFunc("/api/monitoring/", authMiddleware(handleMonitoringRouter))
+	mux.HandleFunc("/api/prescriptive/", orgMiddleware(handlePrescriptiveRouter))
+	mux.HandleFunc("/api/monitoring/", orgMiddleware(handleMonitoringRouter))
+	mux.HandleFunc("/v1/health", authMiddleware(handleDashboardHealth))
+	mux.HandleFunc("/v1/dashboard/costs", orgMiddleware(handleCosts))
+	mux.HandleFunc("/v1/dashboard/summary", orgMiddleware(handleSummary))
+	mux.HandleFunc("/v1/dashboard/anomalies", orgMiddleware(handleAnomalies))
+	mux.HandleFunc("/v1/dashboard/events", authMiddleware(handleSSE))
+	mux.HandleFunc("/v1/admin/budget-rules", orgMiddleware(handleBudgetRules))
+	mux.HandleFunc("/v1/admin/teams", orgMiddleware(handleTeams))
+	mux.HandleFunc("/v1/admin/seed-demo", authMiddleware(handleAdminSeed))
+	mux.HandleFunc("/v1/admin/escalation-policies", orgMiddleware(handleEscalationPolicies))
+	mux.HandleFunc("/v1/budget/status", orgMiddleware(handleBudgetStatus))
+	mux.HandleFunc("/v1/prescriptive/report/", handleReportFrontend)
+	mux.HandleFunc("/v1/prescriptive/", orgMiddleware(handlePrescriptiveRouter))
+	mux.HandleFunc("/v1/monitoring/", orgMiddleware(handleMonitoringRouter))
 	mux.HandleFunc("/assessments", handleAssessmentFrontend)
 	mux.HandleFunc("/dashboard", handleDashboard)
 	mux.HandleFunc("/", handleLanding)
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "3001"
+	srv := &http.Server{Addr: ":" + port, Handler: mux}
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		log.Printf("Cost dashboard starting on :%s...", port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("server error: %v", err)
+		}
+	}()
+
+	sig := <-quit
+	log.Printf("received signal %v, shutting down...", sig)
+	cancel()
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Fatalf("server forced shutdown: %v", err)
 	}
-	log.Printf("Cost dashboard starting on :%s...", port)
-	log.Fatal(http.ListenAndServe(":"+port, mux))
+	log.Println("server stopped")
 }
 
 func initDB() error {
@@ -218,6 +334,10 @@ func initDB() error {
 		return err
 	}
 	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_cost_model ON cost_entries(model)`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_cost_model_timestamp ON cost_entries(model, timestamp)`)
 	if err != nil {
 		return err
 	}
@@ -246,93 +366,131 @@ func initDB() error {
 		return err
 	}
 	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_cost_team ON cost_entries(team)`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS anomalies (
+		id BIGSERIAL PRIMARY KEY,
+		request_id TEXT NOT NULL UNIQUE,
+		model TEXT NOT NULL,
+		total_tokens INTEGER NOT NULL,
+		mean DOUBLE PRECISION NOT NULL,
+		stddev DOUBLE PRECISION NOT NULL,
+		z_score DOUBLE PRECISION NOT NULL,
+		detected_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	)`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_anomalies_model ON anomalies(model)`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_anomalies_detected ON anomalies(detected_at DESC)`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS cost_summary_hourly (
+		hour_start TIMESTAMPTZ NOT NULL,
+		model TEXT NOT NULL,
+		total_tokens BIGINT NOT NULL DEFAULT 0,
+		total_input BIGINT NOT NULL DEFAULT 0,
+		total_output BIGINT NOT NULL DEFAULT 0,
+		request_count INTEGER NOT NULL DEFAULT 0,
+		org_id TEXT NOT NULL DEFAULT '',
+		PRIMARY KEY (hour_start, model, org_id)
+	)`)
+	if err != nil {
+		return err
+	}
+
+	// Multi-tenancy: add orgs table and migrate existing tables.
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS orgs (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	)`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE cost_entries ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT ''`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE anomalies ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT ''`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE budget_rules ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT ''`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE teams ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT ''`)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(`ALTER TABLE monitoring_rules ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT ''`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT ''`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE savings_events ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT ''`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS escalated_at TIMESTAMPTZ`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS escalation_policies (
+		id SERIAL PRIMARY KEY,
+		name TEXT NOT NULL,
+		alert_type TEXT NOT NULL DEFAULT '',
+		model TEXT NOT NULL DEFAULT '*',
+		severity TEXT NOT NULL DEFAULT 'warning',
+		timeout_minutes INTEGER NOT NULL DEFAULT 30,
+		webhook_url TEXT NOT NULL,
+		enabled BOOLEAN NOT NULL DEFAULT true,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		org_id TEXT NOT NULL DEFAULT ''
+	)`)
 	return err
 }
 
 func dataRetention(ctx context.Context) {
-	interval := 24 * time.Hour
-	maxAge := 90
-	ticker := time.NewTicker(interval)
+	ticker := time.NewTicker(24 * time.Hour)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
-			result, err := db.Exec(`DELETE FROM cost_entries WHERE timestamp < NOW() - $1::interval`, fmt.Sprintf("%d days", maxAge))
+			result, err := db.Exec(`DELETE FROM cost_entries WHERE timestamp < NOW() - $1::interval`, fmt.Sprintf("%d days", retentionMaxAge))
 			if err != nil {
-				log.Printf("data retention prune failed: %v", err)
+				log.Printf("data retention cost prune failed: %v", err)
 			} else if n, _ := result.RowsAffected(); n > 0 {
-				log.Printf("data retention pruned %d entries older than %d days", n, maxAge)
+				log.Printf("data retention pruned %d cost entries older than %d days", n, retentionMaxAge)
 			}
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-func detectAnomalies(ctx context.Context) {
-	interval := 5 * time.Minute
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			period := "24h"
-			since, _ := time.ParseDuration(period)
-			sinceStr := time.Now().UTC().Add(-since).Format(time.RFC3339)
-
-			rows, err := db.Query(
-				`SELECT ce.request_id, ce.model, ce.input_tokens + ce.output_tokens,
-				        ms.mean, ms.stddev,
-				        (ce.input_tokens + ce.output_tokens - ms.mean) / NULLIF(ms.stddev, 0)
-				 FROM cost_entries ce
-				 JOIN (SELECT model, AVG(input_tokens + output_tokens) AS mean,
-				              STDDEV_SAMP(input_tokens + output_tokens) AS stddev
-				       FROM cost_entries WHERE timestamp >= $1 GROUP BY model) ms
-				   ON ce.model = ms.model
-				 WHERE ce.timestamp >= $1
-				   AND ms.stddev IS NOT NULL
-				   AND ce.input_tokens + ce.output_tokens > ms.mean + 3 * ms.stddev
-				 ORDER BY 6 DESC`,
-				sinceStr,
-			)
+			result, err = db.Exec(`DELETE FROM anomalies WHERE detected_at < NOW() - $1::interval`, fmt.Sprintf("%d days", retentionMaxAge))
 			if err != nil {
-				log.Printf("anomaly query failed: %v", err)
-				continue
+				log.Printf("data retention anomaly prune failed: %v", err)
+			} else if n, _ := result.RowsAffected(); n > 0 {
+				log.Printf("data retention pruned %d anomalies older than %d days", n, retentionMaxAge)
 			}
-
-			for rows.Next() {
-				var a AnomalyEntry
-				if err := rows.Scan(&a.RequestID, &a.Model, &a.TotalTokens, &a.Mean, &a.Stddev, &a.ZScore); err != nil {
-					continue
-				}
-				data, _ := json.Marshal(a)
-				log.Printf("ANOMALY: %s", data)
-				rdb.Publish(ctx, "anomaly:events", string(data))
-				events.broad <- sseEvent{Type: "anomaly", Data: data}
-			}
-			rows.Close()
 		case <-ctx.Done():
 			return
 		}
 	}
 }
 
-func handleAnomalies(w http.ResponseWriter, r *http.Request) {
-	period := r.URL.Query().Get("period")
-	if period == "" {
-		period = "24h"
-	}
-	since, err := time.ParseDuration(period)
-	if err != nil {
-		http.Error(w, "invalid period: valid values: 1h, 6h, 24h, 72h, 168h", http.StatusBadRequest)
-		return
-	}
-	sinceStr := time.Now().UTC().Add(-since).Format(time.RFC3339)
-
+func queryAnomalies(sinceStr string) ([]AnomalyEntry, error) {
 	rows, err := db.Query(
-		`SELECT ce.request_id, ce.model, ce.input_tokens + ce.output_tokens,
+		fmt.Sprintf(`SELECT ce.request_id, ce.model, ce.input_tokens + ce.output_tokens,
 		        ms.mean, ms.stddev,
-		        (ce.input_tokens + ce.output_tokens - ms.mean) / NULLIF(ms.stddev, 0)
+		        (ce.input_tokens + ce.output_tokens - ms.mean) / NULLIF(ms.stddev, 0),
+		        ce.org_id
 		 FROM cost_entries ce
 		 JOIN (SELECT model, AVG(input_tokens + output_tokens) AS mean,
 		              STDDEV_SAMP(input_tokens + output_tokens) AS stddev
@@ -340,12 +498,247 @@ func handleAnomalies(w http.ResponseWriter, r *http.Request) {
 		   ON ce.model = ms.model
 		 WHERE ce.timestamp >= $1
 		   AND ms.stddev IS NOT NULL
-		   AND ce.input_tokens + ce.output_tokens > ms.mean + 3 * ms.stddev
-		 ORDER BY 6 DESC`,
+		   AND ce.input_tokens + ce.output_tokens > ms.mean + %f * ms.stddev
+		 ORDER BY 6 DESC`, anomalyZScore),
 		sinceStr,
 	)
 	if err != nil {
-		log.Printf("anomalies query error: %v", err)
+		return nil, fmt.Errorf("anomaly query: %w", err)
+	}
+	defer rows.Close()
+
+	var results []AnomalyEntry
+	for rows.Next() {
+		var a AnomalyEntry
+		if err := rows.Scan(&a.RequestID, &a.Model, &a.TotalTokens, &a.Mean, &a.Stddev, &a.ZScore, &a.OrgID); err != nil {
+			continue
+		}
+		results = append(results, a)
+	}
+	return results, nil
+}
+
+func refreshCostSummary(ctx context.Context) {
+	ticker := time.NewTicker(15 * time.Minute)
+	defer ticker.Stop()
+	// Run once on startup for recent data.
+	runCostSummaryRefresh()
+	for {
+		select {
+		case <-ticker.C:
+			runCostSummaryRefresh()
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func runCostSummaryRefresh() {
+	_, err := db.Exec(`INSERT INTO cost_summary_hourly (hour_start, model, total_tokens, total_input, total_output, request_count, org_id)
+		SELECT date_trunc('hour', timestamp) as hour_start, model,
+		       SUM(input_tokens + output_tokens), SUM(input_tokens), SUM(output_tokens), COUNT(*), org_id
+		FROM cost_entries
+		WHERE timestamp < date_trunc('hour', NOW())
+		GROUP BY hour_start, model, org_id
+		ON CONFLICT (hour_start, model, org_id) DO UPDATE SET
+			total_tokens = EXCLUDED.total_tokens,
+			total_input = EXCLUDED.total_input,
+			total_output = EXCLUDED.total_output,
+			request_count = EXCLUDED.request_count`)
+	if err != nil {
+		log.Printf("refresh cost summary: %v", err)
+	}
+}
+
+func monitorAlertsEscalation(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			checkAndEscalate(ctx)
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func checkAndEscalate(ctx context.Context) {
+	policies, err := db.Query(`SELECT id, name, alert_type, model, severity, timeout_minutes, webhook_url, org_id
+		FROM escalation_policies WHERE enabled = true`)
+	if err != nil {
+		log.Printf("escalation policies query: %v", err)
+		return
+	}
+	defer policies.Close()
+
+	type policy struct {
+		id             int
+		name           string
+		alertType      string
+		model          string
+		severity       string
+		timeoutMinutes int
+		webhookURL     string
+		orgID          string
+	}
+	var matched []policy
+	for policies.Next() {
+		var p policy
+		if err := policies.Scan(&p.id, &p.name, &p.alertType, &p.model, &p.severity, &p.timeoutMinutes, &p.webhookURL, &p.orgID); err != nil {
+			log.Printf("scan escalation policy: %v", err)
+			continue
+		}
+		matched = append(matched, p)
+	}
+
+	for _, p := range matched {
+		orgFilter := ""
+		args := []interface{}{}
+		argIdx := 1
+		if p.orgID != "" {
+			orgFilter = fmt.Sprintf(" AND org_id = $%d", argIdx)
+			args = append(args, p.orgID)
+			argIdx++
+		}
+		if p.alertType != "" {
+			orgFilter += fmt.Sprintf(" AND alert_type = $%d", argIdx)
+			args = append(args, p.alertType)
+			argIdx++
+		}
+		if p.model != "" && p.model != "*" {
+			orgFilter += fmt.Sprintf(" AND model = $%d", argIdx)
+			args = append(args, p.model)
+			argIdx++
+		}
+		if p.severity != "" {
+			orgFilter += fmt.Sprintf(" AND severity = $%d", argIdx)
+			args = append(args, p.severity)
+			argIdx++
+		}
+
+		interval := fmt.Sprintf("%d minutes", p.timeoutMinutes)
+		query := `SELECT id, model, alert_type, message FROM alerts
+			WHERE acknowledged_at IS NULL AND dismissed_at IS NULL AND escalated_at IS NULL
+			AND created_at < NOW() - $` + fmt.Sprintf("%d", argIdx) + `::interval` + orgFilter
+		args = append(args, interval)
+
+		rows, err := db.Query(query, args...)
+		if err != nil {
+			log.Printf("escalation alert query (policy=%s): %v", p.name, err)
+			continue
+		}
+		for rows.Next() {
+			var alertID int
+			var model, alertType, message string
+			if err := rows.Scan(&alertID, &model, &alertType, &message); err != nil {
+				log.Printf("scan alert for escalation: %v", err)
+				continue
+			}
+			payload, _ := json.Marshal(map[string]interface{}{
+				"escalation_policy": p.name,
+				"alert_id":          alertID,
+				"model":             model,
+				"alert_type":        alertType,
+				"message":           message,
+			})
+			resp, err := webhookClient.Post(p.webhookURL, "application/json", bytes.NewReader(payload))
+			if err != nil {
+				log.Printf("escalation webhook (policy=%s, alert=%d): %v", p.name, alertID, err)
+				continue
+			}
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			db.Exec(`UPDATE alerts SET escalated_at = NOW() WHERE id = $1`, alertID)
+			log.Printf("escalation triggered policy=%s alert=%d url=%s", p.name, alertID, p.webhookURL)
+		}
+		rows.Close()
+	}
+}
+
+func detectAnomalies(ctx context.Context) {
+	ticker := time.NewTicker(anomalyInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			sinceStr := time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339)
+			entries, err := queryAnomalies(sinceStr)
+			if err != nil {
+				log.Printf("detect anomalies: %v", err)
+				continue
+			}
+			for _, a := range entries {
+				_, err := db.Exec(`INSERT INTO anomalies (request_id, model, total_tokens, mean, stddev, z_score, org_id)
+					VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (request_id) DO NOTHING`,
+					a.RequestID, a.Model, a.TotalTokens, a.Mean, a.Stddev, a.ZScore, a.OrgID)
+				if err != nil {
+					log.Printf("persist anomaly: %v", err)
+				}
+				data, err := json.Marshal(a)
+				if err != nil {
+					log.Printf("anomaly marshal: %v", err)
+					continue
+				}
+				log.Printf("ANOMALY: %s", data)
+				rdb.Publish(ctx, "anomaly:events", string(data))
+				events.broadcast(sseEvent{Type: "anomaly", Data: data})
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func handleAnomalies(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("live") == "true" {
+		period := r.URL.Query().Get("period")
+		if period == "" {
+			period = "24h"
+		}
+		since, err := time.ParseDuration(period)
+		if err != nil {
+			http.Error(w, "invalid period: valid values: 1h, 6h, 24h, 72h, 168h", http.StatusBadRequest)
+			return
+		}
+		sinceStr := time.Now().UTC().Add(-since).Format(time.RFC3339)
+		results, err := queryAnomalies(sinceStr)
+		if err != nil {
+			log.Printf("anomalies handler: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(results)
+		return
+	}
+
+	period := r.URL.Query().Get("period")
+	limit := parseIntParam(r, "limit", 100)
+	offset := parseIntParam(r, "offset", 0)
+	if period == "" {
+		period = "168h"
+	}
+	since, err := time.ParseDuration(period)
+	if err != nil {
+		period = "168h"
+		since = 168 * time.Hour
+	}
+	sinceStr := time.Now().UTC().Add(-since).Format(time.RFC3339)
+
+	orgID := getOrgID(r)
+
+	var rows *sql.Rows
+	if orgID != "" {
+		rows, err = db.Query(`SELECT id, request_id, model, total_tokens, mean, stddev, z_score, detected_at
+			FROM anomalies WHERE detected_at >= $1 AND org_id = $2 ORDER BY detected_at DESC LIMIT $3 OFFSET $4`,
+			sinceStr, orgID, limit, offset)
+	} else {
+		rows, err = db.Query(`SELECT id, request_id, model, total_tokens, mean, stddev, z_score, detected_at
+			FROM anomalies WHERE detected_at >= $1 ORDER BY detected_at DESC LIMIT $2 OFFSET $3`, sinceStr, limit, offset)
+	}
+	if err != nil {
+		log.Printf("anomalies history query: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -354,9 +747,12 @@ func handleAnomalies(w http.ResponseWriter, r *http.Request) {
 	var results []AnomalyEntry
 	for rows.Next() {
 		var a AnomalyEntry
-		if err := rows.Scan(&a.RequestID, &a.Model, &a.TotalTokens, &a.Mean, &a.Stddev, &a.ZScore); err != nil {
+		var detectedAt time.Time
+		if err := rows.Scan(&a.ID, &a.RequestID, &a.Model, &a.TotalTokens, &a.Mean, &a.Stddev, &a.ZScore, &detectedAt); err != nil {
+			log.Printf("scan anomaly: %v", err)
 			continue
 		}
+		a.DetectedAt = detectedAt.Format(time.RFC3339)
 		results = append(results, a)
 	}
 
@@ -414,7 +810,7 @@ func ingestCost(ctx context.Context, reqID string) {
 	}
 	n, _ := result.RowsAffected()
 	if n > 0 {
-		data, _ := json.Marshal(map[string]interface{}{
+		data, err := json.Marshal(map[string]interface{}{
 			"request_id":    reqID,
 			"model":         entry.Model,
 			"input_tokens":  entry.InputTokens,
@@ -422,7 +818,11 @@ func ingestCost(ctx context.Context, reqID string) {
 			"timestamp":     entry.Timestamp,
 			"team":          entry.Team,
 		})
-		events.broad <- sseEvent{Type: "cost", Data: data}
+		if err != nil {
+			log.Printf("ingest marshal: %v", err)
+		} else {
+			events.broadcast(sseEvent{Type: "cost", Data: data})
+		}
 		total := entry.InputTokens + entry.OutputTokens
 		if entry.Team != "" {
 			usedKey := fmt.Sprintf("budget:team:%s:used", entry.Team)
@@ -445,31 +845,90 @@ func handleCosts(w http.ResponseWriter, r *http.Request) {
 	}
 	sinceStr := time.Now().UTC().Add(-since).Format(time.RFC3339)
 
-	rows, err := db.Query(
-		`SELECT model, SUM(input_tokens + output_tokens) as total_tokens,
-		        SUM(input_tokens) as total_input, SUM(output_tokens) as total_output,
-		        COUNT(*) as request_count
-		 FROM cost_entries WHERE timestamp >= $1 GROUP BY model ORDER BY total_tokens DESC`,
-		sinceStr,
-	)
-	if err != nil {
-		log.Printf("costs query error: %v", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
+	limit := parseIntParam(r, "limit", 100)
+	offset := parseIntParam(r, "offset", 0)
+	orgID := getOrgID(r)
+
+	useAggregated := r.URL.Query().Get("aggregated") == "true"
 
 	var results []ModelCost
-	for rows.Next() {
-		var mc ModelCost
-		if err := rows.Scan(&mc.Model, &mc.TotalTokens, &mc.TotalInput, &mc.TotalOutput, &mc.RequestCount); err != nil {
-			continue
+
+	if useAggregated {
+		var rows *sql.Rows
+		if orgID != "" {
+			rows, err = db.Query(
+				`SELECT model, COALESCE(SUM(total_tokens),0), COALESCE(SUM(total_input),0),
+				        COALESCE(SUM(total_output),0), COALESCE(SUM(request_count),0)
+				 FROM cost_summary_hourly WHERE hour_start >= $1 AND org_id = $2
+				 GROUP BY model ORDER BY SUM(total_tokens) DESC LIMIT $3 OFFSET $4`,
+				sinceStr, orgID, limit, offset,
+			)
+		} else {
+			rows, err = db.Query(
+				`SELECT model, COALESCE(SUM(total_tokens),0), COALESCE(SUM(total_input),0),
+				        COALESCE(SUM(total_output),0), COALESCE(SUM(request_count),0)
+				 FROM cost_summary_hourly WHERE hour_start >= $1
+				 GROUP BY model ORDER BY SUM(total_tokens) DESC LIMIT $2 OFFSET $3`,
+				sinceStr, limit, offset,
+			)
 		}
-		if mc.RequestCount > 0 {
-			mc.AvgInput = float64(mc.TotalInput) / float64(mc.RequestCount)
-			mc.AvgOutput = float64(mc.TotalOutput) / float64(mc.RequestCount)
+		if err != nil {
+			log.Printf("costs aggregated query error: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
 		}
-		results = append(results, mc)
+		defer rows.Close()
+		for rows.Next() {
+			var mc ModelCost
+			if err := rows.Scan(&mc.Model, &mc.TotalTokens, &mc.TotalInput, &mc.TotalOutput, &mc.RequestCount); err != nil {
+				log.Printf("scan aggregated cost row: %v", err)
+				continue
+			}
+			if mc.RequestCount > 0 {
+				mc.AvgInput = float64(mc.TotalInput) / float64(mc.RequestCount)
+				mc.AvgOutput = float64(mc.TotalOutput) / float64(mc.RequestCount)
+			}
+			results = append(results, mc)
+		}
+	} else {
+		var rows *sql.Rows
+		if orgID != "" {
+			rows, err = db.Query(
+				`SELECT model, SUM(input_tokens + output_tokens) as total_tokens,
+				        SUM(input_tokens) as total_input, SUM(output_tokens) as total_output,
+				        COUNT(*) as request_count
+				 FROM cost_entries WHERE timestamp >= $1 AND org_id = $2
+				 GROUP BY model ORDER BY total_tokens DESC LIMIT $3 OFFSET $4`,
+				sinceStr, orgID, limit, offset,
+			)
+		} else {
+			rows, err = db.Query(
+				`SELECT model, SUM(input_tokens + output_tokens) as total_tokens,
+				        SUM(input_tokens) as total_input, SUM(output_tokens) as total_output,
+				        COUNT(*) as request_count
+				 FROM cost_entries WHERE timestamp >= $1
+				 GROUP BY model ORDER BY total_tokens DESC LIMIT $2 OFFSET $3`,
+				sinceStr, limit, offset,
+			)
+		}
+		if err != nil {
+			log.Printf("costs query error: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var mc ModelCost
+			if err := rows.Scan(&mc.Model, &mc.TotalTokens, &mc.TotalInput, &mc.TotalOutput, &mc.RequestCount); err != nil {
+				log.Printf("scan cost row: %v", err)
+				continue
+			}
+			if mc.RequestCount > 0 {
+				mc.AvgInput = float64(mc.TotalInput) / float64(mc.RequestCount)
+				mc.AvgOutput = float64(mc.TotalOutput) / float64(mc.RequestCount)
+			}
+			results = append(results, mc)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -488,6 +947,8 @@ func handleSummary(w http.ResponseWriter, r *http.Request) {
 	}
 	sinceStr := time.Now().UTC().Add(-since).Format(time.RFC3339)
 
+	orgID := getOrgID(r)
+
 	var summary struct {
 		TotalRequests int     `json:"total_requests"`
 		TotalTokens   int     `json:"total_tokens"`
@@ -499,13 +960,24 @@ func handleSummary(w http.ResponseWriter, r *http.Request) {
 	}
 	summary.Period = period
 
-	row := db.QueryRow(
-		`SELECT COUNT(*), COALESCE(SUM(input_tokens + output_tokens),0),
-		        COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
-		        COUNT(DISTINCT model)
-		 FROM cost_entries WHERE timestamp >= $1`,
-		sinceStr,
-	)
+	var row *sql.Row
+	if orgID != "" {
+		row = db.QueryRow(
+			`SELECT COUNT(*), COALESCE(SUM(input_tokens + output_tokens),0),
+			        COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
+			        COUNT(DISTINCT model)
+			 FROM cost_entries WHERE timestamp >= $1 AND org_id = $2`,
+			sinceStr, orgID,
+		)
+	} else {
+		row = db.QueryRow(
+			`SELECT COUNT(*), COALESCE(SUM(input_tokens + output_tokens),0),
+			        COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0),
+			        COUNT(DISTINCT model)
+			 FROM cost_entries WHERE timestamp >= $1`,
+			sinceStr,
+		)
+	}
 	if err := row.Scan(&summary.TotalRequests, &summary.TotalTokens, &summary.TotalInput, &summary.TotalOutput, &summary.UniqueModels); err != nil {
 		log.Printf("summary query error: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -541,6 +1013,20 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
+}
+
+func orgMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		orgID := r.Header.Get("X-Org-Id")
+		if orgID == "" {
+			orgID = r.URL.Query().Get("org_id")
+		}
+		if orgID != "" {
+			ctx := context.WithValue(r.Context(), orgCtxKey, orgID)
+			r = r.WithContext(ctx)
+		}
+		next(w, r)
+	})
 }
 
 func signPayload(payload []byte, key string) string {
@@ -597,6 +1083,7 @@ func checkBudgets(ctx context.Context) {
 			for rows.Next() {
 				var r BudgetRule
 				if err := rows.Scan(&r.ID, &r.Model, &r.MaxTokens, &r.Period, &r.WebhookURL); err != nil {
+					log.Printf("scan budget rule row: %v", err)
 					continue
 				}
 				since, parseErr := time.ParseDuration(r.Period)
@@ -632,7 +1119,7 @@ func checkBudgets(ctx context.Context) {
 						continue
 					}
 
-					payload, _ := json.Marshal(map[string]interface{}{
+				payload, err := json.Marshal(map[string]interface{}{
 						"rule_id":      r.ID,
 						"model":        r.Model,
 						"period":       r.Period,
@@ -641,9 +1128,13 @@ func checkBudgets(ctx context.Context) {
 						"exceeded_by":  totalTokens.Int64 - r.MaxTokens,
 						"checked_at":   time.Now().UTC().Format(time.RFC3339),
 					})
+					if err != nil {
+						log.Printf("budget webhook marshal: %v", err)
+						continue
+					}
 					resp, postErr := signAndPost(r.WebhookURL, payload)
 					if postErr != nil {
-						log.Printf("webhook post failed for rule %d: %v", r.ID, postErr)
+						log.Printf("budget webhook post error: %v", postErr)
 						continue
 					}
 					io.Copy(io.Discard, resp.Body)
@@ -659,9 +1150,18 @@ func checkBudgets(ctx context.Context) {
 }
 
 func handleBudgetRules(w http.ResponseWriter, r *http.Request) {
+	orgID := getOrgID(r)
 	switch r.Method {
 	case "GET":
-		rows, err := db.Query(`SELECT id, model, max_tokens, period, webhook_url, enabled FROM budget_rules ORDER BY id`)
+		limit := parseIntParam(r, "limit", 100)
+		offset := parseIntParam(r, "offset", 0)
+		var rows *sql.Rows
+		var err error
+		if orgID != "" {
+			rows, err = db.Query(`SELECT id, model, max_tokens, period, webhook_url, enabled FROM budget_rules WHERE org_id = $1 ORDER BY id LIMIT $2 OFFSET $3`, orgID, limit, offset)
+		} else {
+			rows, err = db.Query(`SELECT id, model, max_tokens, period, webhook_url, enabled FROM budget_rules ORDER BY id LIMIT $1 OFFSET $2`, limit, offset)
+		}
 		if err != nil {
 			log.Printf("budget rules query error: %v", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
@@ -672,6 +1172,7 @@ func handleBudgetRules(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var br BudgetRule
 			if err := rows.Scan(&br.ID, &br.Model, &br.MaxTokens, &br.Period, &br.WebhookURL, &br.Enabled); err != nil {
+				log.Printf("scan budget rules list: %v", err)
 				continue
 			}
 			rules = append(rules, br)
@@ -693,8 +1194,8 @@ func handleBudgetRules(w http.ResponseWriter, r *http.Request) {
 			br.Period = "24h"
 		}
 		err := db.QueryRow(
-			`INSERT INTO budget_rules (model, max_tokens, period, webhook_url) VALUES ($1,$2,$3,$4) RETURNING id, enabled`,
-			br.Model, br.MaxTokens, br.Period, br.WebhookURL,
+			`INSERT INTO budget_rules (model, max_tokens, period, webhook_url, org_id) VALUES ($1,$2,$3,$4,$5) RETURNING id, enabled`,
+			br.Model, br.MaxTokens, br.Period, br.WebhookURL, orgID,
 		).Scan(&br.ID, &br.Enabled)
 		if err != nil {
 			log.Printf("budget rules insert error: %v", err)
@@ -713,7 +1214,11 @@ func handleBudgetRules(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid id", http.StatusBadRequest)
 			return
 		}
-		_, err = db.Exec(`DELETE FROM budget_rules WHERE id = $1`, id)
+		if orgID != "" {
+			_, err = db.Exec(`DELETE FROM budget_rules WHERE id = $1 AND org_id = $2`, id, orgID)
+		} else {
+			_, err = db.Exec(`DELETE FROM budget_rules WHERE id = $1`, id)
+		}
 		if err != nil {
 			log.Printf("budget rules delete error: %v", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
@@ -766,6 +1271,7 @@ func costDigest(ctx context.Context) {
 				var model string
 				var total, inp, out, count int64
 				if err := rows.Scan(&model, &total, &inp, &out, &count); err != nil {
+					log.Printf("scan digest row: %v", err)
 					continue
 				}
 				totalTokens += total
@@ -788,7 +1294,11 @@ func costDigest(ctx context.Context) {
 					},
 				},
 			}
-			data, _ := json.Marshal(payload)
+			data, err := json.Marshal(payload)
+			if err != nil {
+				log.Printf("digest marshal: %v", err)
+				continue
+			}
 			resp, err := signAndPost(webhookURL, data)
 			if err != nil {
 				log.Printf("digest webhook failed: %v", err)
@@ -817,6 +1327,7 @@ func syncTeamBudgets(ctx context.Context) {
 			for rows.Next() {
 				var t Team
 				if err := rows.Scan(&t.Name, &t.MonthlyTokenBudget, &t.Period); err != nil {
+					log.Printf("scan team sync row: %v", err)
 					continue
 				}
 				key := fmt.Sprintf("budget:team:%s:limit", t.Name)
@@ -830,9 +1341,18 @@ func syncTeamBudgets(ctx context.Context) {
 }
 
 func handleTeams(w http.ResponseWriter, r *http.Request) {
+	orgID := getOrgID(r)
 	switch r.Method {
 	case "GET":
-		rows, err := db.Query(`SELECT id, name, monthly_token_budget, period FROM teams ORDER BY name`)
+		limit := parseIntParam(r, "limit", 100)
+		offset := parseIntParam(r, "offset", 0)
+		var rows *sql.Rows
+		var err error
+		if orgID != "" {
+			rows, err = db.Query(`SELECT id, name, monthly_token_budget, period FROM teams WHERE org_id = $1 ORDER BY name LIMIT $2 OFFSET $3`, orgID, limit, offset)
+		} else {
+			rows, err = db.Query(`SELECT id, name, monthly_token_budget, period FROM teams ORDER BY name LIMIT $1 OFFSET $2`, limit, offset)
+		}
 		if err != nil {
 			log.Printf("teams query error: %v", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
@@ -843,6 +1363,7 @@ func handleTeams(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var t Team
 			if err := rows.Scan(&t.ID, &t.Name, &t.MonthlyTokenBudget, &t.Period); err != nil {
+				log.Printf("scan teams list: %v", err)
 				continue
 			}
 			teams = append(teams, t)
@@ -864,8 +1385,8 @@ func handleTeams(w http.ResponseWriter, r *http.Request) {
 			t.Period = "30d"
 		}
 		err := db.QueryRow(
-			`INSERT INTO teams (name, monthly_token_budget, period) VALUES ($1,$2,$3) RETURNING id`,
-			t.Name, t.MonthlyTokenBudget, t.Period,
+			`INSERT INTO teams (name, monthly_token_budget, period, org_id) VALUES ($1,$2,$3,$4) RETURNING id`,
+			t.Name, t.MonthlyTokenBudget, t.Period, orgID,
 		).Scan(&t.ID)
 		if err != nil {
 			log.Printf("teams insert error: %v", err)
@@ -887,7 +1408,11 @@ func handleTeams(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var name string
-		err = db.QueryRow(`DELETE FROM teams WHERE id = $1 RETURNING name`, id).Scan(&name)
+		if orgID != "" {
+			err = db.QueryRow(`DELETE FROM teams WHERE id = $1 AND org_id = $2 RETURNING name`, id, orgID).Scan(&name)
+		} else {
+			err = db.QueryRow(`DELETE FROM teams WHERE id = $1 RETURNING name`, id).Scan(&name)
+		}
 		if err != nil {
 			log.Printf("teams delete error: %v", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
@@ -896,6 +1421,99 @@ func handleTeams(w http.ResponseWriter, r *http.Request) {
 		rdb.Del(r.Context(), fmt.Sprintf("budget:team:%s:limit", name))
 		rdb.Del(r.Context(), fmt.Sprintf("budget:team:%s:used", name))
 		log.Printf("audit: team deleted id=%d name=%s from %s", id, name, r.RemoteAddr)
+		w.WriteHeader(http.StatusNoContent)
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func handleEscalationPolicies(w http.ResponseWriter, r *http.Request) {
+	orgID := getOrgID(r)
+	switch r.Method {
+	case "GET":
+		var rows *sql.Rows
+		var err error
+		if orgID != "" {
+			rows, err = db.Query(`SELECT id, name, alert_type, model, severity, timeout_minutes, webhook_url, enabled, created_at
+				FROM escalation_policies WHERE org_id = $1 ORDER BY name`, orgID)
+		} else {
+			rows, err = db.Query(`SELECT id, name, alert_type, model, severity, timeout_minutes, webhook_url, enabled, created_at
+				FROM escalation_policies ORDER BY name`)
+		}
+		if err != nil {
+			log.Printf("escalation policies query error: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+		var policies []EscalationPolicy
+		for rows.Next() {
+			var p EscalationPolicy
+			var createdAt time.Time
+			if err := rows.Scan(&p.ID, &p.Name, &p.AlertType, &p.Model, &p.Severity, &p.TimeoutMinutes, &p.WebhookURL, &p.Enabled, &createdAt); err != nil {
+				log.Printf("scan escalation policy: %v", err)
+				continue
+			}
+			p.CreatedAt = createdAt.Format(time.RFC3339)
+			policies = append(policies, p)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(policies)
+
+	case "POST":
+		var p EscalationPolicy
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		if p.Name == "" || p.WebhookURL == "" {
+			http.Error(w, "name and webhook_url required", http.StatusBadRequest)
+			return
+		}
+		if p.TimeoutMinutes <= 0 {
+			p.TimeoutMinutes = 30
+		}
+		if p.Severity == "" {
+			p.Severity = "warning"
+		}
+		if p.Model == "" {
+			p.Model = "*"
+		}
+		err := db.QueryRow(
+			`INSERT INTO escalation_policies (name, alert_type, model, severity, timeout_minutes, webhook_url, enabled, org_id)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+			p.Name, p.AlertType, p.Model, p.Severity, p.TimeoutMinutes, p.WebhookURL, p.Enabled, orgID,
+		).Scan(&p.ID)
+		if err != nil {
+			log.Printf("create escalation policy error: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		p.CreatedAt = time.Now().UTC().Format(time.RFC3339)
+		log.Printf("audit: escalation policy created id=%d name=%s from %s", p.ID, p.Name, r.RemoteAddr)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(p)
+
+	case "DELETE":
+		idStr := r.URL.Query().Get("id")
+		id, err := strconv.Atoi(idStr)
+		if err != nil || id <= 0 {
+			http.Error(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		if orgID != "" {
+			_, err = db.Exec(`DELETE FROM escalation_policies WHERE id = $1 AND org_id = $2`, id, orgID)
+		} else {
+			_, err = db.Exec(`DELETE FROM escalation_policies WHERE id = $1`, id)
+		}
+		if err != nil {
+			log.Printf("delete escalation policy error: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("audit: escalation policy deleted id=%d from %s", id, r.RemoteAddr)
 		w.WriteHeader(http.StatusNoContent)
 
 	default:

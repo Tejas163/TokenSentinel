@@ -53,6 +53,7 @@ func exportCSV(w http.ResponseWriter, assessmentID int) {
 		var model, provider, scenario string
 		var currentCost, projectedCost, inputM, outputM float64
 		if err := rows.Scan(&model, &provider, &currentCost, &projectedCost, &inputM, &outputM, &scenario); err != nil {
+			log.Printf("csv export scan projection: %v", err)
 			continue
 		}
 		writer.Write([]string{
@@ -78,6 +79,7 @@ func exportCSV(w http.ResponseWriter, assessmentID int) {
 			var currentCost, projectedCost, savings float64
 			var payback int
 			if err := recRows.Scan(&cat, &desc, &currentCost, &projectedCost, &savings, &payback, &priority); err != nil {
+				log.Printf("csv export scan recommendation: %v", err)
 				continue
 			}
 			writer.Write([]string{cat, desc, fmt.Sprintf("%.2f", currentCost), fmt.Sprintf("%.2f", projectedCost), fmt.Sprintf("%.2f", savings), fmt.Sprintf("%d", payback), priority})

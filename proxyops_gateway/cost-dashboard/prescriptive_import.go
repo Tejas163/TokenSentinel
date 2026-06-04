@@ -34,8 +34,12 @@ func handleImportCSV(w http.ResponseWriter, r *http.Request) {
 		importCSVWithMapping(w, r)
 	} else {
 		var mapping CSVColumnMapping
-		if err := json.NewDecoder(r.Body).Decode(&mapping); err != nil {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 10<<20)).Decode(&mapping); err != nil {
 			http.Error(w, "invalid body: send JSON with column mapping or multipart file", http.StatusBadRequest)
+			return
+		}
+		if mapping.AssessmentID <= 0 {
+			http.Error(w, "assessment_id required and must be positive", http.StatusBadRequest)
 			return
 		}
 
@@ -80,7 +84,11 @@ func importCSVWithMapping(w http.ResponseWriter, r *http.Request) {
 	}
 
 	assessmentIDStr := r.FormValue("assessment_id")
-	assessmentID, _ := strconv.Atoi(assessmentIDStr)
+	assessmentID, err := strconv.Atoi(assessmentIDStr)
+	if err != nil || assessmentID <= 0 {
+		http.Error(w, "assessment_id required and must be positive", http.StatusBadRequest)
+		return
+	}
 
 	hasHeader := r.FormValue("has_header") == "true"
 

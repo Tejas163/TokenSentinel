@@ -94,8 +94,18 @@ func handleMonitoringRules(w http.ResponseWriter, r *http.Request) {
 }
 
 func listMonitoringRules(w http.ResponseWriter, r *http.Request) {
-	rows, err := db.Query(`SELECT id, model, pct_threshold, abs_threshold, period, enabled, webhook_url, email_to, created_at, updated_at
-		FROM monitoring_rules ORDER BY model`)
+	limit := parseIntParam(r, "limit", 1000)
+	offset := parseIntParam(r, "offset", 0)
+	orgID := getOrgID(r)
+	var rows *sql.Rows
+	var err error
+	if orgID != "" {
+		rows, err = db.Query(`SELECT id, model, pct_threshold, abs_threshold, period, enabled, webhook_url, email_to, created_at, updated_at
+			FROM monitoring_rules WHERE org_id = $1 ORDER BY model LIMIT $2 OFFSET $3`, orgID, limit, offset)
+	} else {
+		rows, err = db.Query(`SELECT id, model, pct_threshold, abs_threshold, period, enabled, webhook_url, email_to, created_at, updated_at
+			FROM monitoring_rules ORDER BY model LIMIT $1 OFFSET $2`, limit, offset)
+	}
 	if err != nil {
 		log.Printf("list monitoring rules error: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -108,6 +118,7 @@ func listMonitoringRules(w http.ResponseWriter, r *http.Request) {
 		var rule MonitoringRule
 		var createdAt, updatedAt time.Time
 		if err := rows.Scan(&rule.ID, &rule.Model, &rule.PctThreshold, &rule.AbsThreshold, &rule.Period, &rule.Enabled, &rule.WebhookURL, &rule.EmailTo, &createdAt, &updatedAt); err != nil {
+			log.Printf("scan monitoring rule: %v", err)
 			continue
 		}
 		rule.CreatedAt = createdAt.Format(time.RFC3339)
@@ -125,6 +136,10 @@ func createMonitoringRule(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
+	if rule.Model == "" {
+		http.Error(w, "model required", http.StatusBadRequest)
+		return
+	}
 	if rule.Period == "" {
 		rule.Period = "7d"
 	}
@@ -135,10 +150,12 @@ func createMonitoringRule(w http.ResponseWriter, r *http.Request) {
 		rule.AbsThreshold = 100
 	}
 
+	orgID := getOrgID(r)
+
 	var id int
-	err := db.QueryRow(`INSERT INTO monitoring_rules (model, pct_threshold, abs_threshold, period, enabled, webhook_url, email_to)
-		VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-		rule.Model, rule.PctThreshold, rule.AbsThreshold, rule.Period, rule.Enabled, rule.WebhookURL, rule.EmailTo).Scan(&id)
+	err := db.QueryRow(`INSERT INTO monitoring_rules (model, pct_threshold, abs_threshold, period, enabled, webhook_url, email_to, org_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+		rule.Model, rule.PctThreshold, rule.AbsThreshold, rule.Period, rule.Enabled, rule.WebhookURL, rule.EmailTo, orgID).Scan(&id)
 	if err != nil {
 		log.Printf("create monitoring rule error: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -158,9 +175,17 @@ func createMonitoringRule(w http.ResponseWriter, r *http.Request) {
 func getMonitoringRule(w http.ResponseWriter, r *http.Request, id int) {
 	var rule MonitoringRule
 	var createdAt, updatedAt time.Time
-	err := db.QueryRow(`SELECT id, model, pct_threshold, abs_threshold, period, enabled, webhook_url, email_to, created_at, updated_at
-		FROM monitoring_rules WHERE id = $1`, id).Scan(
-		&rule.ID, &rule.Model, &rule.PctThreshold, &rule.AbsThreshold, &rule.Period, &rule.Enabled, &rule.WebhookURL, &rule.EmailTo, &createdAt, &updatedAt)
+	orgID := getOrgID(r)
+	var err error
+	if orgID != "" {
+		err = db.QueryRow(`SELECT id, model, pct_threshold, abs_threshold, period, enabled, webhook_url, email_to, created_at, updated_at
+			FROM monitoring_rules WHERE id = $1 AND org_id = $2`, id, orgID).Scan(
+			&rule.ID, &rule.Model, &rule.PctThreshold, &rule.AbsThreshold, &rule.Period, &rule.Enabled, &rule.WebhookURL, &rule.EmailTo, &createdAt, &updatedAt)
+	} else {
+		err = db.QueryRow(`SELECT id, model, pct_threshold, abs_threshold, period, enabled, webhook_url, email_to, created_at, updated_at
+			FROM monitoring_rules WHERE id = $1`, id).Scan(
+			&rule.ID, &rule.Model, &rule.PctThreshold, &rule.AbsThreshold, &rule.Period, &rule.Enabled, &rule.WebhookURL, &rule.EmailTo, &createdAt, &updatedAt)
+	}
 	if err == sql.ErrNoRows {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
@@ -183,8 +208,19 @@ func updateMonitoringRule(w http.ResponseWriter, r *http.Request, id int) {
 		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
-	_, err := db.Exec(`UPDATE monitoring_rules SET model=$1, pct_threshold=$2, abs_threshold=$3, period=$4, enabled=$5, webhook_url=$6, email_to=$7, updated_at=NOW() WHERE id=$8`,
-		rule.Model, rule.PctThreshold, rule.AbsThreshold, rule.Period, rule.Enabled, rule.WebhookURL, rule.EmailTo, id)
+	if rule.Model == "" {
+		http.Error(w, "model required", http.StatusBadRequest)
+		return
+	}
+	orgID := getOrgID(r)
+	var err error
+	if orgID != "" {
+		_, err = db.Exec(`UPDATE monitoring_rules SET model=$1, pct_threshold=$2, abs_threshold=$3, period=$4, enabled=$5, webhook_url=$6, email_to=$7, updated_at=NOW() WHERE id=$8 AND org_id=$9`,
+			rule.Model, rule.PctThreshold, rule.AbsThreshold, rule.Period, rule.Enabled, rule.WebhookURL, rule.EmailTo, id, orgID)
+	} else {
+		_, err = db.Exec(`UPDATE monitoring_rules SET model=$1, pct_threshold=$2, abs_threshold=$3, period=$4, enabled=$5, webhook_url=$6, email_to=$7, updated_at=NOW() WHERE id=$8`,
+			rule.Model, rule.PctThreshold, rule.AbsThreshold, rule.Period, rule.Enabled, rule.WebhookURL, rule.EmailTo, id)
+	}
 	if err != nil {
 		log.Printf("update monitoring rule error: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -197,7 +233,14 @@ func updateMonitoringRule(w http.ResponseWriter, r *http.Request, id int) {
 }
 
 func deleteMonitoringRule(w http.ResponseWriter, r *http.Request, id int) {
-	result, err := db.Exec(`DELETE FROM monitoring_rules WHERE id = $1`, id)
+	orgID := getOrgID(r)
+	var result sql.Result
+	var err error
+	if orgID != "" {
+		result, err = db.Exec(`DELETE FROM monitoring_rules WHERE id = $1 AND org_id = $2`, id, orgID)
+	} else {
+		result, err = db.Exec(`DELETE FROM monitoring_rules WHERE id = $1`, id)
+	}
 	if err != nil {
 		log.Printf("delete monitoring rule error: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -224,6 +267,12 @@ func handleAlerts(w http.ResponseWriter, r *http.Request) {
 	var args []interface{}
 	argIdx := 1
 
+	orgID := getOrgID(r)
+	if orgID != "" {
+		conditions = append(conditions, fmt.Sprintf("org_id = $%d", argIdx))
+		args = append(args, orgID)
+		argIdx++
+	}
 	if r.URL.Query().Get("unacknowledged") == "true" {
 		conditions = append(conditions, "acknowledged_at IS NULL AND dismissed_at IS NULL")
 	}
@@ -257,6 +306,7 @@ func handleAlerts(w http.ResponseWriter, r *http.Request) {
 		var acknowledgedAt, dismissedAt sql.NullTime
 		var createdAt time.Time
 		if err := rows.Scan(&a.ID, &monitoringRuleID, &a.Model, &a.AlertType, &a.Severity, &a.Message, &a.CurrentValue, &a.ThresholdValue, &acknowledgedAt, &dismissedAt, &createdAt); err != nil {
+			log.Printf("scan alert: %v", err)
 			continue
 		}
 		if monitoringRuleID.Valid {
@@ -352,6 +402,7 @@ func handleSavings(w http.ResponseWriter, r *http.Request) {
 		var detectedAt, createdAt time.Time
 		if err := rows.Scan(&e.ID, &assessmentID, &recommendationID, &e.Model, &detectedAt, &e.DetectionMethod,
 			&e.PreviousMonthlyCost, &e.CurrentMonthlyCost, &e.EstimatedMonthlySavings, &e.Confidence, &e.Notes, &createdAt); err != nil {
+			log.Printf("scan savings event: %v", err)
 			continue
 		}
 		if assessmentID.Valid {

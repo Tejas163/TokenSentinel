@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 )
 
@@ -38,10 +39,18 @@ func (s *pgStore) GetAssessment(id int) (*Assessment, error) {
 		return nil, fmt.Errorf("query assessment %d: %w", id, err)
 	}
 
-	json.Unmarshal(gpuJSON, &a.GPUConfigs)
-	json.Unmarshal(tokenJSON, &a.TokenDistribution)
-	json.Unmarshal(providerJSON, &a.ProvidersUsed)
-	json.Unmarshal(teamJSON, &a.TeamComposition)
+	if err := json.Unmarshal(gpuJSON, &a.GPUConfigs); err != nil {
+		log.Printf("unmarshal gpu_configs for assessment %d: %v", id, err)
+	}
+	if err := json.Unmarshal(tokenJSON, &a.TokenDistribution); err != nil {
+		log.Printf("unmarshal token_distribution for assessment %d: %v", id, err)
+	}
+	if err := json.Unmarshal(providerJSON, &a.ProvidersUsed); err != nil {
+		log.Printf("unmarshal providers_used for assessment %d: %v", id, err)
+	}
+	if err := json.Unmarshal(teamJSON, &a.TeamComposition); err != nil {
+		log.Printf("unmarshal team_composition for assessment %d: %v", id, err)
+	}
 	a.CreatedAt = createdAt.Format(time.RFC3339)
 	a.UpdatedAt = updatedAt.Format(time.RFC3339)
 	return &a, nil
@@ -61,6 +70,7 @@ func (s *pgStore) QueryLiveCostData(since time.Time) (*AssessmentLiveData, error
 		var model string
 		var inputSum, outputSum, count int64
 		if err := rows.Scan(&model, &inputSum, &outputSum, &count); err != nil {
+			log.Printf("scan live cost data: %v", err)
 			continue
 		}
 		ld.Models[model] = &ModelUsage{
@@ -117,6 +127,7 @@ func (s *pgStore) GetCostProjections(assessmentID int, scenario string) ([]CostP
 	for rows.Next() {
 		var cp CostProjection
 		if err := rows.Scan(&cp.Model, &cp.Provider, &cp.CurrentMonthlyCost, &cp.ProjectedMonthlyCost, &cp.InputTokensMillions, &cp.OutputTokensMillions); err != nil {
+			log.Printf("scan cost projection: %v", err)
 			continue
 		}
 		cp.Scenario = scenario
@@ -140,6 +151,7 @@ func (s *pgStore) GetRecommendations(assessmentID int) ([]Recommendation, error)
 		var r Recommendation
 		var createdAt time.Time
 		if err := rows.Scan(&r.ID, &r.Category, &r.Description, &r.CurrentCost, &r.ProjectedCost, &r.MonthlySavings, &r.PaybackPeriodDays, &r.Priority, &createdAt); err != nil {
+			log.Printf("scan recommendation: %v", err)
 			continue
 		}
 		r.AssessmentID = assessmentID

@@ -59,7 +59,7 @@
   @media (max-width: 768px) { body { padding: 1rem; } .summary-grid { grid-template-columns: 1fr 1fr; } }
 </style>
 </head>
-<body data-api-key="{{index . "APIKey"}}">
+<body>
 <div id="app">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;">
     <div>
@@ -141,7 +141,7 @@
 let reportData = null;
 let whatIfBase = null;
 let assessmentId = null;
-const API_KEY = document.body.getAttribute('data-api-key');
+const API_KEY = new URLSearchParams(window.location.search).get('api_key') || '';
 
 function getAssessmentId() {
   var parts = window.location.pathname.split('/');
