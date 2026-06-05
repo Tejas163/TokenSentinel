@@ -55,6 +55,22 @@
   .status-badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600; }
   .status-ready { background: #14532d; color: #86efac; }
   .status-pending { background: #713f12; color: #fde68a; }
+  .quickstart-bar { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 0.75rem 1.25rem; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+  .quickstart-bar .label { color: #64748b; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .quickstart-bar .links { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+  .quickstart-bar .links a, .quickstart-bar .links button { display: inline-block; padding: 0.4rem 0.85rem; border-radius: 6px; font-size: 0.8rem; text-decoration: none; cursor: pointer; border: 1px solid #334155; background: #1e293b; color: #e2e8f0; transition: all 0.15s; }
+  .quickstart-bar .links a:hover, .quickstart-bar .links button:hover { background: #334155; }
+  .quickstart-bar .links .seed-btn { background: #38bdf8; color: #0f172a; border-color: #38bdf8; font-weight: 600; }
+  .quickstart-bar .links .seed-btn:hover { background: #7dd3fc; }
+  .empty-state { text-align: center; padding: 2rem 1rem; }
+  .empty-state .icon { font-size: 2.5rem; margin-bottom: 0.75rem; }
+  .empty-state h3 { color: #f8fafc; font-size: 1.1rem; margin-bottom: 0.5rem; }
+  .empty-state p { color: #64748b; font-size: 0.85rem; margin-bottom: 1rem; }
+  .empty-state .links { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
+  .empty-state .links button { display: inline-block; padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.85rem; cursor: pointer; border: 1px solid #334155; background: #1e293b; color: #e2e8f0; }
+  .empty-state .links button:hover { background: #334155; }
+  .empty-state .links .btn-primary-callout { background: #38bdf8; color: #0f172a; border-color: #38bdf8; font-weight: 600; }
+  .empty-state .links .btn-primary-callout:hover { background: #7dd3fc; }
 </style>
 </head>
 <body data-api-key="{{index . "APIKey"}}">
@@ -63,6 +79,14 @@
   <a href="/">Home</a>
   <a href="/dashboard">Dashboard</a>
   <a href="/assessments" class="active">Assessments</a>
+</div>
+<div class="quickstart-bar">
+  <span class="label">Quick Start:</span>
+  <div class="links">
+    <button class="seed-btn" onclick="seedDemoData()">&#x1f331; Seed Demo Data</button>
+    <a href="https://github.com/Tejas163/TokenSentinel?tab=readme-ov-file#deploy-in-5-minutes" target="_blank">&#x1f517; Setup Guide</a>
+    <a href="/">&#x1f3e0; Home</a>
+  </div>
 </div>
 
 <div id="existing-assessments" class="card">
@@ -263,7 +287,7 @@ async function loadAssessments() {
     var list = await r.json();
     var container = document.getElementById('assessments-list');
     if (!list || list.length === 0) {
-      container.innerHTML = '<p style="color:#64748b;">No assessments yet. Create one below.</p>';
+      container.innerHTML = '<div class="empty-state"><div class="icon">&#x1f9fe;</div><h3>No assessments yet</h3><p>Create a prescriptive assessment to analyze your LLM spend and get cost-saving recommendations. Try seeding demo data to see a sample.</p><div class="links"><button class="btn-primary-callout" onclick="seedDemoData()">&#x1f331; Seed Demo Data</button></div></div>';
       return;
     }
     var html = '<table><thead><tr><th>ID</th><th>Company</th><th>Spend</th><th>Volume</th><th>Source</th><th>Version</th><th>Created</th><th></th></tr></thead><tbody>';
@@ -282,7 +306,7 @@ async function loadAssessments() {
     html += '</tbody></table>';
     container.innerHTML = html;
   } catch (e) {
-    document.getElementById('assessments-list').innerHTML = '<p style="color:#fca5a5;">Failed to load assessments. Is the API key set?</p>';
+    document.getElementById('assessments-list').innerHTML = '<div class="empty-state"><div class="icon">&#x26a0;</div><h3>Could not load assessments</h3><p>Is the dashboard running and API key configured? Try seeding demo data or check the gateway health.</p><div class="links"><button class="btn-primary-callout" onclick="location.reload()">&#x1f504; Retry</button><button onclick="seedDemoData()">&#x1f331; Seed Demo Data</button></div></div>';
   }
 }
 
@@ -376,6 +400,20 @@ async function submitAssessment(e) {
     btn.textContent = 'Create Assessment & Run';
   }
   return false;
+}
+
+async function seedDemoData() {
+  var statusEl = document.getElementById('form-status');
+  if (statusEl) { statusEl.className = 'success-msg'; statusEl.textContent = 'Seeding demo data...'; }
+  try {
+    var r = await fetch('/api/admin/seed-demo', { method: 'POST', headers: {'X-Api-Key': API_KEY} });
+    if (!r.ok) throw new Error((await r.text()) || 'seed failed');
+    var d = await r.json();
+    if (statusEl) statusEl.innerHTML = 'Demo data ready! ' + d.entries_added + ' cost entries added. <a href="/api/prescriptive/report/' + d.assessment_id + '" style="color:#38bdf8;" target="_blank">View Report &rarr;</a>';
+    loadAssessments();
+  } catch (e) {
+    if (statusEl) { statusEl.className = 'error-msg'; statusEl.textContent = 'Error: ' + e.message; }
+  }
 }
 </script>
 </body>

@@ -78,8 +78,9 @@
     <a href="#recommendations">Recommendations</a>
     <a href="#whatif">What-If</a>
     <a href="#versions">Versions</a>
-    <a href="/dashboard" style="margin-left:auto;">Dashboard</a>
-    <a href="/">Home</a>
+    <a href="/dashboard">Dashboard</a>
+    <a href="/assessments">Assessments</a>
+    <a href="/" style="margin-left:auto;">Home</a>
   </div>
 
   <div id="loading" class="loading">Loading report data...</div>
@@ -173,7 +174,7 @@ async function loadReport() {
     render();
   } catch (e) {
     document.getElementById('loading').classList.add('hidden');
-    document.getElementById('error').textContent = 'Failed to load report: ' + e.message;
+    document.getElementById('error').innerHTML = 'Failed to load report: ' + e.message + '<br><br><a href="/assessments" class="btn">&#x2190; Back to Assessments</a> <a href="/dashboard" class="btn">Go to Dashboard</a>';
     document.getElementById('error').classList.remove('hidden');
   }
 }

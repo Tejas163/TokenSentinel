@@ -42,12 +42,59 @@
   .alert-item.warning { background: #713f12; color: #fde68a; }
   .alert-item.info { background: #1e3a5f; color: #93c5fd; }
   .alert-item button { background: transparent; border: 1px solid currentColor; color: inherit; padding: 0.15rem 0.5rem; border-radius: 4px; cursor: pointer; font-size: 0.75rem; }
+
+/* Empty state */
+.empty-state { text-align: center; padding: 2rem 1rem; color: #64748b; }
+.empty-state .icon { font-size: 2.5rem; margin-bottom: 0.75rem; }
+.empty-state h3 { color: #f8fafc; font-size: 1.1rem; margin-bottom: 0.5rem; }
+.empty-state p { font-size: 0.85rem; margin-bottom: 1rem; max-width: 480px; margin-left: auto; margin-right: auto; }
+.empty-state .links { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
+.empty-state .links a, .empty-state .links button { display: inline-block; padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.85rem; text-decoration: none; cursor: pointer; border: 1px solid #334155; background: #1e293b; color: #e2e8f0; transition: all 0.15s; }
+.empty-state .links a:hover, .empty-state .links button:hover { background: #334155; border-color: #475569; }
+.empty-state .links .btn-primary-callout { background: #38bdf8; color: #0f172a; border-color: #38bdf8; font-weight: 600; }
+.empty-state .links .btn-primary-callout:hover { background: #7dd3fc; }
+.empty-state code { display: inline-block; background: #0f172a; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.8rem; color: #38bdf8; }
+
+/* Playground panel */
+#playground-toggle { display: inline-flex; align-items: center; gap: 0.35rem; color: #94a3b8; text-decoration: none; padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.875rem; border: 1px solid #334155; cursor: pointer; background: transparent; }
+#playground-toggle:hover { background: #1e293b; color: #f8fafc; }
+#playground-panel { display: none; }
+#playground-panel.open { display: block; }
+.pg-form { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 1rem; }
+.pg-form .pg-full { grid-column: 1 / -1; }
+.pg-form label { display: block; color: #94a3b8; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.3rem; }
+.pg-form select, .pg-form input { width: 100%; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 0.85rem; outline: none; }
+.pg-form select:focus, .pg-form input:focus { border-color: #38bdf8; }
+.pg-result { background: #0f172a; border-radius: 6px; padding: 0.75rem; border: 1px solid #334155; font-family: monospace; font-size: 0.8rem; white-space: pre-wrap; color: #22c55e; }
+.pg-send-btn { background: #22c55e; color: #0f172a; border: none; padding: 0.5rem 1.5rem; border-radius: 6px; font-weight: 600; font-size: 0.85rem; cursor: pointer; }
+.pg-send-btn:hover { background: #4ade80; }
+.pg-send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Wizard overlay */
+.wizard-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 2000; align-items: center; justify-content: center; }
+.wizard-overlay.open { display: flex; }
+.wizard-modal { background: #1e293b; border-radius: 12px; padding: 2.5rem; max-width: 560px; width: 90%; border: 1px solid #334155; max-height: 90vh; overflow-y: auto; }
+.wizard-modal h2 { color: #38bdf8; font-size: 1.3rem; margin-bottom: 0.5rem; border: none; padding: 0; }
+.wizard-modal .sub { color: #64748b; font-size: 0.9rem; margin-bottom: 1.5rem; }
+.wizard-step { margin-bottom: 1.5rem; }
+.wizard-step .step-num { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: #38bdf8; color: #0f172a; font-size: 0.8rem; font-weight: 700; margin-right: 0.5rem; }
+.wizard-step .step-title { color: #f8fafc; font-weight: 600; font-size: 1rem; }
+.wizard-step .step-desc { color: #94a3b8; font-size: 0.85rem; margin: 0.5rem 0 0 2.25rem; }
+.wizard-step .step-action { margin: 0.75rem 0 0 2.25rem; }
+.wizard-step .step-action .seed-btn { background: #38bdf8; color: #0f172a; border: none; padding: 0.6rem 1.5rem; border-radius: 6px; font-weight: 600; font-size: 0.9rem; cursor: pointer; }
+.wizard-step .step-action .seed-btn:hover { background: #7dd3fc; }
+.wizard-step .step-action .seed-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.wizard-step .step-action .seed-status { display: inline-block; margin-left: 0.75rem; font-size: 0.8rem; color: #22c55e; }
+.wizard-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #334155; }
+.wizard-actions button { background: transparent; border: 1px solid #475569; color: #94a3b8; padding: 0.4rem 1rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
+.wizard-actions button:hover { background: #334155; color: #f8fafc; }
 </style>
 </head>
 <body data-api-key="{{index . "APIKey"}}">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.5rem;">
 <h1 style="margin-bottom:0;">&#9632; TokenSentinel Cost Dashboard <span class="live-badge">LIVE</span></h1>
 <a href="/assessments" style="color:#94a3b8;text-decoration:none;padding:0.5rem 1rem;border-radius:6px;font-size:0.875rem;border:1px solid #334155;">Assessments</a>
+<button id="playground-toggle" onclick="togglePlayground()">&#x1f6e1; Playground</button>
 <a href="https://github.com/Tejas163/TokenSentinel" target="_blank" style="color:#94a3b8;text-decoration:none;padding:0.5rem 1rem;border-radius:6px;font-size:0.875rem;border:1px solid #334155;">GitHub</a>
 <a href="/" style="color:#94a3b8;text-decoration:none;padding:0.5rem 1rem;border-radius:6px;font-size:0.875rem;border:1px solid #334155;">Home</a>
 </div>
@@ -77,6 +124,72 @@
   <h2>Cost by Model</h2>
   <table><thead><tr><th>Model</th><th>Requests</th><th>Input Tokens</th><th>Output Tokens</th><th>Total Tokens</th><th>Avg Input</th><th>Avg Output</th></tr></thead><tbody id="costs"></tbody></table>
   <div class="loading" id="loading">Loading...</div>
+  <div id="empty-state-costs" class="empty-state" style="display:none;">
+    <div class="icon">&#x1f4ca;</div>
+    <h3>No cost data yet</h3>
+    <p>Send your first LLM request through the gateway or seed demo data to see costs appear here live.</p>
+    <div class="links">
+      <button class="btn-primary-callout" onclick="seedDemoData()">&#x1f331; Seed Demo Data</button>
+      <a href="https://github.com/Tejas163/TokenSentinel?tab=readme-ov-file#deploy-in-5-minutes" target="_blank">&#x1f517; Quick Start Guide</a>
+    </div>
+  </div>
+</div>
+
+<div class="card" id="playground-panel">
+  <h2 style="margin-bottom:0.5rem;">&#x1f6e1; API Playground</h2>
+  <p style="color:#64748b;font-size:0.8rem;margin-bottom:1rem;">Send a simulated LLM request to see costs appear in the dashboard in real time. Uses the same cost pipeline as production traffic.</p>
+  <div class="pg-form">
+    <div>
+      <label>Model</label>
+      <select id="pg-model"><option value="">Loading...</option></select>
+    </div>
+    <div>
+      <label>Team</label>
+      <input type="text" id="pg-team" placeholder="engineering" value="playground">
+    </div>
+    <div>
+      <label>Input Tokens</label>
+      <input type="number" id="pg-input" min="50" max="10000" value="500">
+    </div>
+    <div>
+      <label>Output Tokens</label>
+      <input type="number" id="pg-output" min="10" max="5000" value="150">
+    </div>
+    <div class="pg-full" style="display:flex;gap:1rem;align-items:center;">
+      <button class="pg-send-btn" id="pg-send-btn" onclick="sendPlaygroundRequest()">&#x25b6; Send Test Request</button>
+      <span style="color:#64748b;font-size:0.8rem;" id="pg-estimate">Est. cost: $0.00</span>
+    </div>
+  </div>
+  <div id="pg-result" class="pg-result" style="display:none;"></div>
+</div>
+
+<div class="wizard-overlay" id="wizard">
+  <div class="wizard-modal">
+    <h2>&#x1f680; Welcome to TokenSentinel</h2>
+    <div class="sub">Your LLM cost governance dashboard. Get started in under a minute.</div>
+    <div class="wizard-step">
+      <span class="step-num">1</span><span class="step-title">Get Data Flowing</span>
+      <div class="step-desc">Your dashboard is empty. Populate it with realistic demo data — 7 days of cost entries across 7 models and 4 teams — or send real traffic through the gateway.</div>
+      <div class="step-action">
+        <button class="seed-btn" id="wizard-seed-btn" onclick="seedDemoData()">&#x1f331; Seed Demo Data</button>
+        <span class="seed-status" id="wizard-seed-status"></span>
+      </div>
+    </div>
+    <div class="wizard-step">
+      <span class="step-num">2</span><span class="step-title">Explore the Dashboard</span>
+      <div class="step-desc">Use the period selector to view costs by hour, day, or week. Watch for anomaly alerts and live cost updates via SSE.</div>
+    </div>
+    <div class="wizard-step">
+      <span class="step-num">3</span><span class="step-title">Run an Assessment</span>
+      <div class="step-desc">Use the <a href="/assessments" style="color:#38bdf8;">Prescriptive Engine</a> to generate cost-saving recommendations with dollar projections, what-if simulations, and exportable reports.</div>
+    </div>
+    <div class="wizard-actions">
+      <label style="color:#64748b;font-size:0.8rem;display:flex;align-items:center;gap:0.4rem;margin-right:auto;">
+        <input type="checkbox" id="wizard-dont-show"> Don't show again
+      </label>
+      <button onclick="hideWizard()">Dismiss</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -125,6 +238,8 @@ function setPeriod(p) {
 
 loadSummary('24h');
 loadCosts('24h');
+loadPlaygroundModels();
+checkEmptyState();
 
 var evtSource = new EventSource('/api/dashboard/events?api_key=' + API_KEY);
 evtSource.addEventListener('cost', function(e) {
@@ -197,6 +312,136 @@ async function loadActiveAlerts() {
     }).join('');
   } catch(e) {}
 }
+
+/* ── Guided Onboarding Wizard ── */
+function checkEmptyState() {
+  var dontShow = localStorage.getItem('ts-wizard-dismissed');
+  if (dontShow === 'true') return;
+  setTimeout(function() {
+    var loadingEl = document.getElementById('loading');
+    if (loadingEl && loadingEl.style.display === 'none' && document.querySelectorAll('#costs tr').length === 0) {
+      showWizard();
+    }
+  }, 2000);
+}
+
+function showWizard() {
+  document.getElementById('wizard').classList.add('open');
+}
+
+function hideWizard() {
+  if (document.getElementById('wizard-dont-show').checked) {
+    localStorage.setItem('ts-wizard-dismissed', 'true');
+  }
+  document.getElementById('wizard').classList.remove('open');
+}
+
+async function seedDemoData() {
+  var btn = document.getElementById('wizard-seed-btn') || document.querySelector('.empty-state .btn-primary-callout');
+  var status = document.getElementById('wizard-seed-status');
+  if (btn) { btn.disabled = true; btn.textContent = 'Seeding...'; }
+  if (status) status.textContent = 'Creating demo data...';
+  try {
+    var r = await fetch('/api/admin/seed-demo', { method: 'POST', headers: {'X-Api-Key': API_KEY} });
+    if (!r.ok) throw new Error((await r.text()) || 'seed failed');
+    var d = await r.json();
+    if (status) status.textContent = d.already_exists ? 'Demo data refreshed! ' + d.entries_added + ' entries' : 'Done! ' + d.entries_added + ' cost entries added';
+    hideWizard();
+    loadSummary(currentPeriod);
+    loadCosts(currentPeriod);
+  } catch (e) {
+    if (status) status.textContent = 'Error: ' + e.message;
+    if (btn) { btn.disabled = false; btn.textContent = 'Seed Demo Data'; }
+  }
+}
+
+/* ── API Playground ── */
+function togglePlayground() {
+  var panel = document.getElementById('playground-panel');
+  panel.classList.toggle('open');
+  if (panel.classList.contains('open')) {
+    estimateCost();
+  }
+}
+
+async function loadPlaygroundModels() {
+  try {
+    var r = await fetch('/api/playground/models', {headers:{'X-Api-Key':API_KEY}});
+    var models = await r.json();
+    var sel = document.getElementById('pg-model');
+    sel.innerHTML = models.map(function(m) {
+      return '<option value="' + m.name + '" data-in="' + m.input_cost_per_1k + '" data-out="' + m.output_cost_per_1k + '">' + m.name + ' ($' + m.input_cost_per_1k.toFixed(4) + '/1K in, $' + m.output_cost_per_1k.toFixed(4) + '/1K out)</option>';
+    }).join('');
+    document.getElementById('pg-input').addEventListener('input', estimateCost);
+    document.getElementById('pg-output').addEventListener('input', estimateCost);
+    document.getElementById('pg-model').addEventListener('change', estimateCost);
+    estimateCost();
+  } catch(e) {
+    document.getElementById('pg-model').innerHTML = '<option value="">Models unavailable</option>';
+  }
+}
+
+function estimateCost() {
+  var sel = document.getElementById('pg-model');
+  var opt = sel.options[sel.selectedIndex];
+  if (!opt || !opt.value) {
+    document.getElementById('pg-estimate').textContent = 'Select a model';
+    return;
+  }
+  var inCost = parseFloat(opt.getAttribute('data-in')) || 0;
+  var outCost = parseFloat(opt.getAttribute('data-out')) || 0;
+  var inputTk = parseInt(document.getElementById('pg-input').value) || 0;
+  var outputTk = parseInt(document.getElementById('pg-output').value) || 0;
+  var total = (inputTk / 1000 * inCost) + (outputTk / 1000 * outCost);
+  document.getElementById('pg-estimate').textContent = 'Est. cost: $' + total.toFixed(5);
+}
+
+async function sendPlaygroundRequest() {
+  var btn = document.getElementById('pg-send-btn');
+  var resultEl = document.getElementById('pg-result');
+  btn.disabled = true;
+  btn.textContent = 'Sending...';
+  resultEl.style.display = 'none';
+  try {
+    var model = document.getElementById('pg-model').value;
+    if (!model) { throw new Error('Select a model'); }
+    var r = await fetch('/api/playground/send', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json', 'X-Api-Key':API_KEY},
+      body: JSON.stringify({
+        model: model,
+        input_tokens: parseInt(document.getElementById('pg-input').value) || 500,
+        output_tokens: parseInt(document.getElementById('pg-output').value) || 150,
+        team: document.getElementById('pg-team').value || 'playground'
+      })
+    });
+    if (!r.ok) throw new Error((await r.text()) || 'send failed');
+    var d = await r.json();
+    resultEl.style.display = 'block';
+    resultEl.textContent = JSON.stringify(d, null, 2);
+  } catch(e) {
+    resultEl.style.display = 'block';
+    resultEl.style.color = '#fca5a5';
+    resultEl.textContent = 'Error: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '\u25b6 Send Test Request';
+  }
+}
+
+/* ── Modify loadSummary for empty state ── */
+var origLoadSummary = loadSummary;
+loadSummary = function(period) {
+  origLoadSummary(period);
+  setTimeout(function() {
+    var emptyEl = document.getElementById('empty-state-costs');
+    var costsTbody = document.getElementById('costs');
+    if (emptyEl && costsTbody) {
+      var hasRows = costsTbody.querySelector('tr');
+      emptyEl.style.display = hasRows ? 'none' : 'block';
+    }
+  }, 100);
+};
 </script>
 </body>
 </html>
