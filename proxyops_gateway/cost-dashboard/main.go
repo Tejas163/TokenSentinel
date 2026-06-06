@@ -29,6 +29,9 @@ import (
 //go:embed dashboard.html
 var dashboardContent embed.FS
 
+//go:embed enterprise.html
+var enterpriseHTML embed.FS
+
 //go:embed static/styles.css
 var staticCSS embed.FS
 
@@ -307,6 +310,8 @@ func main() {
 	mux.HandleFunc("/static/styles.css", handleStaticCSS)
 	mux.HandleFunc("/assessments", handleAssessmentFrontend)
 	mux.HandleFunc("/dashboard", handleDashboard)
+	mux.HandleFunc("/enterprise", handleEnterprisePage)
+	mux.HandleFunc("/api/enterprise/inquiry", handleEnterpriseInquiry)
 	mux.HandleFunc("/", handleLanding)
 
 	srv := &http.Server{Addr: ":" + port, Handler: mux}

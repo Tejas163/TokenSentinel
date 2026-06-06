@@ -8,6 +8,7 @@ COPY src/ src/
 RUN cargo build --release
 
 FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y libssl3 ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/mcp-gateway /usr/local/bin/mcp-gateway
 EXPOSE 3010 3011 3012
 CMD ["mcp-gateway"]
