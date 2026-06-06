@@ -20,10 +20,11 @@ fn truncate_args(args: &serde_json::Value, max_len: usize) -> String {
 
 pub async fn dispatch(req: JsonRpcRequest, agent: AgentInfo) -> JsonRpcResponse {
     let request_id = uuid::Uuid::new_v4().to_string();
-    let span = tracing::info_span!("dispatch", request_id = %request_id, method = %req.method);
+    let method = req.method.clone();
+    let span = tracing::info_span!("dispatch", request_id = %request_id, method = %method);
     let _enter = span.enter();
 
-    let resp = match req.method.as_str() {
+    let resp = match method.as_str() {
         "tools/list" => handle_tools_list(req),
         "tools/call" => handle_tools_call(req, agent, &request_id).await,
         _ => JsonRpcResponse::error(req.id, -32601, "Method not found"),
@@ -32,7 +33,7 @@ pub async fn dispatch(req: JsonRpcRequest, agent: AgentInfo) -> JsonRpcResponse 
     if resp.error.is_some() {
         tracing::warn!(
             request_id = %request_id,
-            method = %req.method,
+            method = %method,
             error_code = resp.error.as_ref().map(|e| e.code),
             error_message = resp.error.as_ref().map(|e| e.message.as_str()),
             "rpc error"

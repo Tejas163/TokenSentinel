@@ -19,7 +19,7 @@ pub async fn team_for_api_key(key: &str) -> Option<String> {
     // Try Redis first (hash key "team_keys", field is the API key)
     match redis::get_connection().await {
         Ok(mut conn) => {
-            let result: Result<Option<String>, _> = redis::cmd("HGET")
+            let result: Result<Option<String>, _> = ::redis::cmd("HGET")
                 .arg("team_keys")
                 .arg(key)
                 .query_async(&mut conn)
