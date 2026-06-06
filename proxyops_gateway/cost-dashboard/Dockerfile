@@ -1,8 +1,11 @@
 FROM golang:1.26-alpine AS builder
 WORKDIR /app
-COPY go.mod go.sum ./
+COPY cost-dashboard/go.mod cost-dashboard/go.sum ./cost-dashboard/
+COPY internal/engine/go.mod ./internal/engine/
+WORKDIR /app/cost-dashboard
 RUN go mod download
-COPY . .
+COPY cost-dashboard/ .
+COPY internal/engine/ ../internal/engine/
 RUN CGO_ENABLED=0 GOOS=linux go build -o /app/cost-dashboard .
 
 FROM alpine:3.21

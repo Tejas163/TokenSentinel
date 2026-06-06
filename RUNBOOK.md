@@ -8,7 +8,7 @@
 | Go Router | 8080 | Go | `GET /health` → `{"status":"ok"}` |
 | Cost Dashboard | 3001 | Go | `GET /health` → `{"status":"ok"}` |
 | MCP Gateway | 3010 | Rust/axum | `GET /health` → `{"status":"ok"}` |
-| Erlang Monitor | — | Erlang/OTP | Redis key `health:erlang-monitor` (TTL 30s) |
+| Cost Dashboard (monitoring) | 3001 | Go | Spend trends, savings detection, alert dispatch |
 | Redis | 6379 | — | `PING` → `PONG` |
 | Postgres | 5432 | — | `pg_isready` |
 
@@ -66,8 +66,6 @@ Or manually:
 # Redis
 docker compose exec redis redis-cli PING
 
-# Erlang monitor heartbeat
-docker compose exec redis redis-cli TTL health:erlang-monitor
 
 # Rust proxy
 curl -s http://localhost:3000/health
@@ -130,8 +128,7 @@ Check Redis is running: `docker compose ps redis`. If the container is up, verif
 
 ### "Dashboard shows no data"
 1. Seed demo data: `curl -X POST http://localhost:3001/api/admin/seed-demo -H "X-Api-Key: dev-key-123"`
-2. Check Erlang monitor heartbeat: `docker compose exec redis redis-cli TTL health:erlang-monitor`
-3. Check Redis cost entries: `docker compose exec redis redis-cli KEYS 'sentinel:*'`
+2. Check Redis cost entries: `docker compose exec redis redis-cli KEYS 'sentinel:*'`
 
 ### "401 Unauthorized"
 Ensure `X-Api-Key` header matches `AUTH_API_KEY` or `MCP_API_KEY` env var.

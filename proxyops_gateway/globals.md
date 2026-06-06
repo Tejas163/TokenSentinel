@@ -4,11 +4,11 @@
 
 | Key Pattern                     | Purpose              | Written By         | Read By            | TTL   |
 |---------------------------------|----------------------|--------------------|--------------------|-------|
-| `sentinel:{request_id}:cost`    | Telemetry cost entry | erlang-monitor     | erlang-monitor     | 24h   |
+| `sentinel:{request_id}:cost`    | Telemetry cost entry | go-router          | cost-dashboard     | 24h   |
 | `proxy:{session_id}:blocked`    | Blocked session flag | rust-proxy         | rust-proxy         | —     |
 | `ratelimit:{key}`               | Rate-limit counter   | rust-proxy         | rust-proxy         | 60s   |
 | `routes:{pattern}`              | Routing rule         | go-router          | go-router          | —     |
-| `health:{service}`              | Heartbeat timestamp  | erlang-monitor     | cost-dashboard     | 30s   |
+| `health:{service}`              | Heartbeat timestamp  | rust-proxy, go-router | cost-dashboard     | 30s   |
 
 ## Key Components
 
@@ -18,7 +18,7 @@
 | `{session_id}`   | Client session identifier            | `sess_abc123`                  |
 | `{key}`          | Client IP or API key hash            | `md5(203.0.113.42)`            |
 | `{pattern}`      | URL path glob pattern                | `/v1/chat/completions`         |
-| `{service}`      | Service name                         | `rust-proxy`, `go-router`, `erlang-monitor`, `cost-dashboard` |
+| `{service}`      | Service name                         | `rust-proxy`, `go-router`, `cost-dashboard` |
 
 ---
 

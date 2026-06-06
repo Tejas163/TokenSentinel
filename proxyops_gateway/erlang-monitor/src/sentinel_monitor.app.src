@@ -1,8 +1,0 @@
-{application, sentinel_monitor, [
-    {description, "TokenSentinel Erlang Telemetry Monitor"},
-    {vsn, "0.1.0"},
-    {registered, []},
-    {applications, [kernel, stdlib]},
-    {mod, {sentinel_monitor, []}},
-    {env, []}
-]}.

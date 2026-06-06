@@ -92,8 +92,7 @@
 4. Go resolves route from Redis rules, selects upstream
 5. Go proxies to upstream AI provider, collects response
 6. Go writes telemetry data to Redis
-7. Erlang Monitor picks up telemetry events via pub/sub
-8. Response flows back: Go → Rust → Client
+7. Response flows back: Go → Rust → Client
 
 ## Service Dependencies
 
@@ -101,5 +100,4 @@
 |---------------|-------------------|--------------------|
 | rust-proxy    | redis, go-router  | —                  |
 | go-router     | redis             | rust-proxy         |
-| erlang-monitor| redis             | —                  |
-| redis         | —                 | rust-proxy, go-router, erlang-monitor |
+| redis         | —                 | rust-proxy, go-router |

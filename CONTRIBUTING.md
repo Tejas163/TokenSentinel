@@ -17,7 +17,6 @@ TokenSentinel/
 │   ├── go-router/            # Go orchestration router
 │   ├── cost-dashboard/       # Go + Postgres dashboard
 │   ├── mcp-gateway/          # Rust MCP + A2A gateway
-│   ├── erlang-monitor/       # Erlang OTP telemetry monitor
 │   └── docker-compose.yml    # Service orchestration
 ├── deploy/                   # Deployment scripts & k8s manifests
 ├── benchmark/                # k6 load testing
@@ -35,7 +34,7 @@ TokenSentinel/
 | go-router | Go | 8080 | net/http, redis |
 | cost-dashboard | Go | 3001 | net/http, pgx, redis, html/template |
 | mcp-gateway | Rust | 3010 | axum, SSE, reqwest |
-| erlang-monitor | Erlang | — | OTP, eredis |
+| cost-dashboard | Go | 3001 | net/http, pgx, redis, html/template, monitoring engine |
 
 ## Development Workflow
 
@@ -115,9 +114,6 @@ cd proxyops_gateway/cost-dashboard && go test ./...
 # All Rust tests
 cd proxyops_gateway/rust-proxy && cargo test
 cd proxyops_gateway/mcp-gateway && cargo test
-
-# Erlang tests (in Docker)
-docker compose -f proxyops_gateway/docker-compose.yml run --rm erlang-monitor sh -c 'cd /app && rebar3 eunit'
 
 # E2E
 bash deploy/run-e2e.sh

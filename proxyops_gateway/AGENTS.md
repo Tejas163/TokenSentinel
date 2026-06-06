@@ -8,11 +8,10 @@ Multi-language AI gateway with MCP agentic gateway, orchestrated via Docker Comp
 |---------|----------|---------|------|
 | **rust-proxy** | Rust (axum) | `3000` | Ingress, auth, request forwarding |
 | **go-router** | Go (net/http) | `8080` | Route resolution, load balancing, dispatch |
-| **cost-dashboard** | Go (net/http) | `3001` | Cost visualization, prescriptive engine, anomaly detection |
+| **cost-dashboard** | Go (net/http) | `3001` | Cost visualization, prescriptive engine, anomaly & savings detection, alert dispatch (webhook/email/SSE) |
 | **mcp-gateway** | Rust (axum) | `3010` | MCP protocol (SSE + POST /message), tool dispatch |
-| **erlang-monitor** | Erlang | — | Sentinel monitoring, health checks |
 | **redis** | — (redis:7-alpine) | `6379` | Shared state, rate-limit, pub/sub |
-| **postgres** | — (postgres:16-alpine) | `5432` | Cost dashboard data, assessments |
+| **postgres** | — (postgres:16-alpine) | `5432` | Cost dashboard data, assessments, monitoring rules |
 
 ## Data Flow
 
@@ -50,7 +49,7 @@ Client/AI Agent → rust-proxy (:3000) ─┬→ go-router (:8080) → upstream
 
 | Var | Used By | Purpose |
 |-----|---------|---------|
-| `MCP_API_KEY` | rust-proxy, mcp-gateway | Comma-separated API keys for MCP auth |
+| `MCP_API_KEY` | mcp-gateway | Comma-separated API keys for MCP auth |
 | `AGENT_TEAM_MAP` | mcp-gateway | `key=team,key=team` mapping for data scoping |
 | `DASHBOARD_URL` | mcp-gateway | Cost dashboard base URL |
 | `DASHBOARD_API_KEY` | mcp-gateway | API key for dashboard upstream calls |
@@ -84,7 +83,6 @@ proxyops_gateway/
 │   │   │   ├── catalog.rs    # Cached model catalog
 │   │   │   └── router.rs     # Cost-aware routing
 │   │   └── redis/            # Redis connection manager
-├── erlang-monitor/       # Erlang — health monitoring
 ├── docker-compose.yml
 └── AGENTS.md
 ```

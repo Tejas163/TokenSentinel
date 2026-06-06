@@ -15,7 +15,7 @@ to its job.
 |--------|-------|------|
 | **1. Edge Proxy** | Rust + Redis | TLS termination, auth, rate limiting, request forwarding |
 | **2. Orchestration Router** | Go + Redis | Route resolution, load balancing, circuit breaker, retry, cost telemetry |
-| **3. Telemetry Monitor** | Erlang + Redis | Health heartbeat, anomaly detection, cost aggregation alerts |
+| **3. Cost Governance** | Go + Redis + Postgres | Spend trends, savings detection, alert dispatch, budget webhooks |
 | **4. Enterprise SDK** | Java/Spring Boot | Client SDK for enterprise integration, admin API, Micrometer metrics |
 | **5. Prompt Optimizer** | Python (EvoluNet) | Genetic-algorithm prompt evolution, cost-aware mutation |
 
@@ -23,7 +23,7 @@ to its job.
 | Component | Storage | Purpose |
 |-----------|---------|---------|
 | Redis | In-memory + pub/sub | Shared state: rate limits, routes, health, cost events |
-| SQLite | Persistent volume | Cost dashboard historical data |
+| PostgreSQL | Persistent volume | Cost dashboard historical data, monitoring rules, alerts |
 | Flat files (evolunet) | Disk | Prompt templates, generation scores |
 
 ---
@@ -42,11 +42,14 @@ to its job.
 - Cost telemetry writes to Redis (`sentinel:{request_id}:cost`)
 - Redis pub/sub notification on cost events
 
-## Module 3: Erlang Telemetry Monitor (`proxyops_gateway/erlang-monitor/`)
-- Health heartbeat to Redis (`health:erlang-monitor`, 30s TTL)
-- Publishes to `health:events` channel
-- Cost telemetry persistence to Redis via `SETEX`
-- Budget alert polling (planned)
+## Module 3: Cost Governance + Monitoring (`proxyops_gateway/cost-dashboard/`)
+- Spend trend analysis (7d vs 7d comparison, per-model alerts)
+- Savings detection (>=30% cost drops logged as savings events)
+- Alert dispatch via webhook (HMAC-signed), SMTP email, and SSE
+- Budget threshold webhooks with 30-min cooldown
+- Anomaly detection (3σ sliding window per-model)
+- 3-sigma anomaly detection via SSE broadcast
+- Continuous optimization engine (prescriptive reports, what-if scenarios)
 
 ## Module 4: Spring Boot Enterprise SDK (`spring-boot-sdk/`)
 - Auto-configured Spring Boot Starter
@@ -66,14 +69,14 @@ to its job.
 
 ## Cross-Cutting Concerns
 - **Cost governance:** Every request records model + token usage. Dashboard provides CFO-ready cost breakdown by model, time period, and (future) team/user.
-- **Health monitoring:** All services write heartbeats to Redis. Erlang monitor aggregates and alerts.
+- **Health monitoring:** All services write heartbeats to Redis. Cost dashboard aggregates and displays health status.
 - **Security:** TLS at edge, API key auth, internal network isolation.
 - **Observability:** Redis pub/sub event bus, SQLite cost history, Docker logs.
 
 ## Development Status
 - [x] Module 1: Edge Proxy (Rust) — forwarding + circuit breaker working
 - [x] Module 2: Orchestration Router (Go) — full dispatch + cost telemetry working
-- [x] Module 3: Telemetry Monitor (Erlang) — health + cost writes working
+- [x] Module 3: Cost Governance + Monitoring — spend trends, savings detection, alert dispatch working
 - [x] Cost Dashboard (Go + SQLite) — persistence + API + HTML UI
 - [x] Module 4: Enterprise SDK (Spring AI) — 10 `@Tool`-annotated methods auto-registered as Spring AI `ToolCallback` beans, REST clients with retry, 21 unit tests
 - [ ] Module 5: Deploy / Benchmark / E2E — scaffolded, needs implementation

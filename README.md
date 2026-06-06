@@ -167,8 +167,7 @@ TokenSentinel/
 ├── proxyops_gateway/
 │   ├── rust-proxy/          # Rust edge proxy (Axum, Redis)
 │   ├── go-router/           # Go orchestration router
-│   ├── erlang-monitor/      # Erlang OTP telemetry monitor
-│   ├── cost-dashboard/      # Go + SQLite dashboard (embedded HTML)
+│   ├── cost-dashboard/      # Go + Postgres dashboard + monitoring engine
 │   ├── docker-compose.yml   # Dev orchestration
 │   ├── globals.md           # Redis key conventions
 │   └── proxyops-docs/       # Architecture docs

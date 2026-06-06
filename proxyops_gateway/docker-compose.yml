@@ -46,7 +46,9 @@ services:
     restart: unless-stopped
 
   cost-dashboard:
-    build: ./cost-dashboard
+    build:
+      context: .
+      dockerfile: ./cost-dashboard/Dockerfile
     ports:
       - "3001:3001"
     depends_on:
@@ -58,28 +60,6 @@ services:
       - REDIS_ADDR=redis:6379
       - DATABASE_URL=postgres://postgres:postgres@postgres:5432/cost_dashboard?sslmode=disable
       - AUTH_API_KEY=dev-key-123
-    restart: unless-stopped
-
-  monitoring:
-    build: ./monitoring
-    ports:
-      - "3002:3002"
-    depends_on:
-      redis:
-        condition: service_started
-      postgres:
-        condition: service_healthy
-    environment:
-      - REDIS_ADDR=redis:6379
-      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/cost_dashboard?sslmode=disable
-    restart: unless-stopped
-
-  erlang-monitor:
-    build: ./erlang-monitor
-    depends_on:
-      - redis
-    environment:
-      - REDIS_URL=redis://redis:6379
     restart: unless-stopped
 
   mcp-gateway:

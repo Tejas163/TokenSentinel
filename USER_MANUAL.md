@@ -38,12 +38,12 @@ You configure routes in Redis. Clients point at `rust-proxy:3000`. Everything el
                                     ┌────────────┼────────────┐
                                     ▼            ▼            ▼
                            ┌────────────┐ ┌───────────┐ ┌────────────┐
-                           │ PostgreSQL │ │ erlang-   │ │ cost-      │
-                           │ (cost      │ │ monitor   │ │ dashboard  │
-                           │  history)  │ │ (health   │ │ :3001      │
-                           └────────────┘ │  heart-   │ │ Web UI +   │
-                                          │  beats)   │ │ Admin API  │
-                                          └───────────┘ └────────────┘
+                            │ PostgreSQL │ │ cost-      │
+                            │ (cost      │ │ dashboard  │
+                            │  history)  │ │ :3001      │
+                            └────────────┘ │ Web UI +   │
+                                           │ Admin API  │
+                                           └────────────┘
 ```
 
 ### Services at a Glance
@@ -53,7 +53,7 @@ You configure routes in Redis. Clients point at `rust-proxy:3000`. Everything el
 | `rust-proxy` | 3000 | Rust | TLS, rate limiting, upstream circuit breaker |
 | `go-router` | 8080 | Go | Route resolution, load balancing, retry, cost tracking |
 | `cost-dashboard` | 3001 | Go | Web UI, admin API, PostgreSQL persistence |
-| `erlang-monitor` | — | Erlang | Health heartbeat every 30s to Redis |
+| `cost-dashboard` | 3001 | Go | Web UI, admin API, PostgreSQL, monitoring engine (spend trends, savings detection, alerts) |
 | `redis` | 6379 | — | Shared state: routes, costs, budgets, pub/sub |
 | `postgres` | 5432 | — | Historical cost data, teams, budget rules |
 
@@ -159,12 +159,7 @@ Response includes:
 | `GO_ROUTER_URL` | `http://127.0.0.1:8080` | Upstream Go router address |
 | `REDIS_PASSWORD` | — | Redis AUTH password |
 
-### erlang-monitor
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `REDIS_URL` | `redis://127.0.0.1:6379` | Redis connection URL |
-| `REDIS_PASSWORD` | — | Redis AUTH password |
 
 ---
 

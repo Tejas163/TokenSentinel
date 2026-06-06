@@ -32,8 +32,8 @@ curl localhost:3001/health    # cost-dashboard
 | `DATABASE_URL` | cost-dashboard | `postgres://localhost:5432/cost_dashboard?sslmode=disable` | Yes for production |
 | `AUTH_API_KEY` | go-router, cost-dashboard | — (auth disabled) | Recommended |
 | `REDIS_ADDR` | go-router, cost-dashboard | `localhost:6379` | No |
-| `REDIS_URL` | rust-proxy, erlang-monitor | `redis://127.0.0.1:6379` | No |
-| `REDIS_PASSWORD` | go-router, cost-dashboard, erlang-monitor | — | If Redis AUTH enabled |
+| `REDIS_URL` | rust-proxy, mcp-gateway | `redis://127.0.0.1:6379` | No |
+| `REDIS_PASSWORD` | go-router, cost-dashboard | — | If Redis AUTH enabled |
 | `GO_ROUTER_URL` | rust-proxy | `http://127.0.0.1:8080` | No |
 | `BUDGET_TEAM_NAME` | go-router | — | No |
 | `DIGEST_WEBHOOK_URL` | cost-dashboard | — | For Slack/Teams digest |
