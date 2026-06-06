@@ -54,9 +54,93 @@ jobs:
       - run: go vet ./...
       - run: go test ./...
 
+  monitoring:
+    name: Monitoring Service
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: proxyops_gateway/monitoring
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-go@40f1582b2485099de7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.26"
+      - run: go build ./...
+      - run: go vet ./...
+
+  erlang-monitor:
+    name: Erlang Monitor
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: proxyops_gateway/erlang-monitor
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Setup Erlang
+        uses: erlef/setup-beam@8251c48667b97e88a0a24ec512f5b72a039fcea7 # v1
+        with:
+          otp-version: "26"
+      - name: Install rebar3
+        run: |
+          REBAR3_VERSION="3.24.0"
+          REBAR3_SHA256="c18ff4246c22db6945e0e19e665e2c308d143a26a6a0bbaefd7bde9db33ce88e"
+          curl -fsSL "https://github.com/erlang/rebar3/releases/download/${REBAR3_VERSION}/rebar3" -o rebar3
+          echo "${REBAR3_SHA256}  rebar3" | sha256sum -c -
+          chmod +x rebar3
+      - run: ./rebar3 get-deps
+      - run: ./rebar3 compile
+      - run: ./rebar3 eunit
+
   docker:
     name: Docker Build Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - run: docker compose -f proxyops_gateway/docker-compose.yml build
+
+  e2e-integration:
+    name: E2E Integration
+    runs-on: ubuntu-latest
+    needs: [rust-proxy, go-router, cost-dashboard, monitoring, erlang-monitor, docker]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - run: docker compose -f proxyops_gateway/docker-compose.yml up -d
+      - name: Wait for services
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/health > /dev/null 2>&1 && \
+               curl -sf http://localhost:8080/health > /dev/null 2>&1 && \
+               curl -sf http://localhost:3001/health > /dev/null 2>&1; then
+              echo "All services healthy"
+              break
+            fi
+            echo "Waiting for services... attempt $i"
+            sleep 5
+          done
+      - name: Test proxy health
+        run: curl -sf http://localhost:3000/health | grep -q '"status":"ok"'
+      - name: Test router health
+        run: curl -sf http://localhost:8080/health | grep -q '"status":"ok"'
+      - name: Test dashboard health
+        run: curl -sf http://localhost:3001/health | grep -q '"status":"ok"'
+      - name: Test dashboard aggregated health
+        run: curl -sf http://localhost:3001/api/health/all | grep -q '"service":"go-router"' || true
+      - name: Test monitoring service health
+        run: curl -sf http://localhost:3002/health | grep -q '"status":"ok"'
+      - name: Test cost ingest
+        run: |
+          curl -sf -X POST http://localhost:3000/v1/cost \
+            -H "Content-Type: application/json" \
+            -d '{"request_id":"e2e-test-1","model":"gpt-4o","input_tokens":100,"output_tokens":50,"timestamp":"2025-01-01T00:00:00Z"}'
+      - name: Test cost dashboard data
+        run: |
+          sleep 5
+          curl -sf http://localhost:3001/api/dashboard/summary | grep -q 'total_cost'
+      - name: Test admin pricing API
+        run: |
+          curl -sf http://localhost:3001/api/admin/pricing | grep -q 'gpt-4'
+      - name: Test landing page
+        run: curl -sf http://localhost:3001/ | grep -q 'TokenSentinel'
+      - name: Cleanup
+        if: always()
+        run: docker compose -f proxyops_gateway/docker-compose.yml down -v

@@ -96,6 +96,7 @@ pub async fn handle_sse(
     let session_id = uuid::Uuid::new_v4().to_string();
     let (tx, rx) = mpsc::channel::<Event>(64);
 
+    tracing::info!(session_id = %session_id, "sse session started");
     store.register(session_id.clone(), tx).await;
 
     let store_clone = store.clone();
@@ -103,6 +104,7 @@ pub async fn handle_sse(
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(60)).await;
         store_clone.remove(&sid).await;
+        tracing::info!(session_id = %sid, "sse session expired");
     });
 
     let endpoint_event = Event::default()
@@ -127,9 +129,13 @@ pub async fn handle_message(
 ) -> impl IntoResponse {
     let session_id = match &query.session_id {
         Some(id) => id.clone(),
-        None => return Json(JsonRpcResponse::error(None, -32000, "session_id required")),
+        None => {
+            tracing::warn!("message received without session_id");
+            return Json(JsonRpcResponse::error(None, -32000, "session_id required"));
+        }
     };
 
+    tracing::debug!(session_id = %session_id, method = %req.method, "message received");
     let response = crate::mcp::dispatch(req, agent).await;
 
     let event = Event::default()
@@ -138,6 +144,9 @@ pub async fn handle_message(
 
     match store.send(&session_id, event).await {
         Ok(()) => Json(JsonRpcResponse::success(response.id.clone(), serde_json::json!({"accepted": true}))),
-        Err(e) => Json(JsonRpcResponse::internal_error(response.id, &e)),
+        Err(e) => {
+            tracing::warn!(session_id = %session_id, error = %e, "failed to send message to session");
+            Json(JsonRpcResponse::internal_error(response.id, &e))
+        }
     }
 }
