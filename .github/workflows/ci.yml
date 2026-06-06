@@ -77,15 +77,19 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Setup Erlang
-        uses: erlef/setup-beam@v1
+        uses: erlef/setup-beam@8251c48667b97e88a0a24ec512f5b72a039fcea7 # v1
         with:
           otp-version: "26"
-      - run: |
-          curl -fsSL https://s3.amazonaws.com/rebar3/rebar3 -o rebar3
+      - name: Install rebar3
+        run: |
+          REBAR3_VERSION="3.24.0"
+          REBAR3_SHA256="c18ff4246c22db6945e0e19e665e2c308d143a26a6a0bbaefd7bde9db33ce88e"
+          curl -fsSL "https://github.com/erlang/rebar3/releases/download/${REBAR3_VERSION}/rebar3" -o rebar3
+          echo "${REBAR3_SHA256}  rebar3" | sha256sum -c -
           chmod +x rebar3
-          ./rebar3 get-deps
-          ./rebar3 compile
-          ./rebar3 eunit
+      - run: ./rebar3 get-deps
+      - run: ./rebar3 compile
+      - run: ./rebar3 eunit
 
   docker:
     name: Docker Build Check
