@@ -24,6 +24,7 @@ struct AppState {
     circuit_breaker: Arc<CircuitBreaker>,
     redis_conn: Arc<Mutex<ConnectionManager>>,
     go_router_url: String,
+    mcp_gateway_url: String,
 }
 
 #[tokio::main]
@@ -36,6 +37,7 @@ async fn main() {
     let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".into());
     let redis_client = redis::Client::open(redis_url.as_str()).unwrap();
     let go_router_url = std::env::var("GO_ROUTER_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".into());
+    let mcp_gateway_url = std::env::var("MCP_GATEWAY_URL").unwrap_or_else(|_| "http://127.0.0.1:3010".into());
     let redis_conn = Arc::new(Mutex::new(
         redis_client.get_connection_manager().await.unwrap(),
     ));
@@ -45,7 +47,13 @@ async fn main() {
         circuit_breaker: Arc::new(CircuitBreaker::new(5, Duration::from_secs(30), Duration::from_secs(5))),
         redis_conn: redis_conn.clone(),
         go_router_url: go_router_url.clone(),
+        mcp_gateway_url: mcp_gateway_url.clone(),
     };
+
+    let mcp_routes = Router::new()
+        .route("/{*path}", get(mcp_handler).post(mcp_handler))
+        .layer(axum::middleware::from_fn(request_id::request_id_middleware))
+        .layer(TraceLayer::new_for_http());
 
     let proxy_routes = Router::new()
         .route("/{*path}", get(handler).post(handler))
@@ -54,6 +62,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/health", get(health_handler))
+        .nest("/mcp", mcp_routes)
         .merge(proxy_routes)
         .with_state(state);
 
@@ -70,6 +79,42 @@ async fn health_handler(
         .await
         .map(|_| Response::new(Body::from(r#"{"status":"ok"}"#)))
         .map_err(|_| axum::http::StatusCode::SERVICE_UNAVAILABLE)
+}
+
+async fn mcp_handler(
+    State(state): State<AppState>,
+    req: Request<Body>,
+) -> Result<Response<Body>, axum::http::StatusCode> {
+    let (parts, body) = req.into_parts();
+    let body_bytes = axum::body::to_bytes(body, 10 * 1024 * 1024)
+        .await
+        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+    let target_url = format!("{}{}", state.mcp_gateway_url, parts.uri.path());
+
+    let mut filtered_headers = parts.headers.clone();
+    filtered_headers.remove("host");
+
+    let response = state
+        .client
+        .request(parts.method, target_url)
+        .headers(filtered_headers)
+        .body(body_bytes)
+        .send()
+        .await
+        .map_err(|_| axum::http::StatusCode::BAD_GATEWAY)?;
+
+    let status = response.status();
+    let headers = response.headers().clone();
+    let body = response
+        .bytes()
+        .await
+        .map_err(|_| axum::http::StatusCode::BAD_GATEWAY)?;
+
+    let mut builder = Response::builder().status(status);
+    for (name, value) in headers.iter() {
+        builder = builder.header(name, value);
+    }
+    Ok(builder.body(Body::from(body)).unwrap())
 }
 
 async fn handler(

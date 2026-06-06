@@ -96,5 +96,42 @@ pub fn list_tools() -> Vec<McpTool> {
                 "required": ["assessment_id"]
             })),
         },
+        McpTool {
+            name: "whatif_multi_scenario".into(),
+            description: "Run multiple what-if scenarios against a base assessment and compare results side-by-side".into(),
+            input_schema: Some(serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "assessment_id": { "type": "integer" },
+                    "scenarios": { "type": "array", "items": { "type": "object" } }
+                },
+                "required": ["assessment_id", "scenarios"]
+            })),
+        },
+        McpTool {
+            name: "whatif_volume_shift".into(),
+            description: "Model the impact of a volume increase or decrease on costs".into(),
+            input_schema: Some(serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "assessment_id": { "type": "integer" },
+                    "volume_pct": { "type": "number", "description": "Percentage change (positive or negative)" }
+                },
+                "required": ["assessment_id", "volume_pct"]
+            })),
+        },
+        McpTool {
+            name: "whatif_model_switch".into(),
+            description: "Model cost impact of switching from one model to another".into(),
+            input_schema: Some(serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "assessment_id": { "type": "integer" },
+                    "from_model": { "type": "string" },
+                    "to_model": { "type": "string" }
+                },
+                "required": ["assessment_id", "from_model", "to_model"]
+            })),
+        },
     ]
 }
