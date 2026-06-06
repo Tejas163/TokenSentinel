@@ -24,16 +24,44 @@ var knownPrefixes = []struct {
 }
 
 func estimateTokens(text, model string) int {
-	if tke, err := tiktoken.EncodingForModel(model); err == nil {
+	tke, err := tiktoken.EncodingForModel(model)
+	if err == nil {
 		return len(tke.Encode(text, nil, nil))
 	}
 	modelLower := strings.ToLower(model)
 	for _, p := range knownPrefixes {
 		if strings.HasPrefix(modelLower, p.prefix) {
-			if tke, err := tiktoken.GetEncoding(p.encoding); err == nil {
+			tke, err := tiktoken.GetEncoding(p.encoding)
+			if err == nil {
 				return len(tke.Encode(text, nil, nil))
 			}
 		}
 	}
+	if approx, ok := modelFamilyApprox(modelLower); ok {
+		return approx(text)
+	}
 	return len(text) / 4
+}
+
+var modelApproximators = []struct {
+	prefix   string
+	estimate func(text string) int
+}{
+	{"claude-3-5", func(t string) int { return len([]rune(t)) * 4 / 13 }},
+	{"claude-3", func(t string) int { return len([]rune(t)) * 4 / 13 }},
+	{"claude-4", func(t string) int { return len([]rune(t)) * 4 / 13 }},
+	{"claude-2", func(t string) int { return len([]rune(t)) * 4 / 13 }},
+	{"claude-", func(t string) int { return len([]rune(t)) * 4 / 13 }},
+	{"gemini-2", func(t string) int { return len([]rune(t)) / 4 }},
+	{"gemini-1", func(t string) int { return len([]rune(t)) / 4 }},
+	{"gemini-", func(t string) int { return len([]rune(t)) / 4 }},
+}
+
+func modelFamilyApprox(model string) (func(string) int, bool) {
+	for _, a := range modelApproximators {
+		if strings.HasPrefix(model, a.prefix) {
+			return a.estimate, true
+		}
+	}
+	return nil, false
 }

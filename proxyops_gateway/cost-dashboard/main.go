@@ -29,6 +29,9 @@ import (
 //go:embed dashboard.html
 var dashboardContent embed.FS
 
+//go:embed static/styles.css
+var staticCSS embed.FS
+
 func parseIntParam(r *http.Request, key string, defaultVal int) int {
 	v := r.URL.Query().Get(key)
 	if v == "" {
@@ -247,6 +250,8 @@ func main() {
 	appStore = &pgStore{db: db}
 	initEmailConfig()
 
+	syncModelCatalogToRedis(context.Background())
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -264,14 +269,17 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", authMiddleware(handleDashboardHealth))
+	mux.HandleFunc("/api/health/all", authMiddleware(handleHealthAll))
 	mux.HandleFunc("/api/dashboard/costs", orgMiddleware(handleCosts))
 	mux.HandleFunc("/api/dashboard/summary", orgMiddleware(handleSummary))
 	mux.HandleFunc("/api/dashboard/anomalies", orgMiddleware(handleAnomalies))
 	mux.HandleFunc("/api/dashboard/events", authMiddleware(handleSSE))
-	mux.HandleFunc("/api/admin/budget-rules", orgMiddleware(handleBudgetRules))
-	mux.HandleFunc("/api/admin/teams", orgMiddleware(handleTeams))
-	mux.HandleFunc("/api/admin/seed-demo", authMiddleware(handleAdminSeed))
-	mux.HandleFunc("/api/admin/escalation-policies", orgMiddleware(handleEscalationPolicies))
+	mux.HandleFunc("/api/admin/budget-rules", rateLimitMiddleware(orgMiddleware(handleBudgetRules)))
+	mux.HandleFunc("/api/admin/teams", rateLimitMiddleware(orgMiddleware(handleTeams)))
+	mux.HandleFunc("/api/admin/pricing", rateLimitMiddleware(orgMiddleware(handleAdminPricing)))
+	mux.HandleFunc("/api/admin/pricing/", rateLimitMiddleware(orgMiddleware(handleAdminPricing)))
+	mux.HandleFunc("/api/admin/seed-demo", rateLimitMiddleware(authMiddleware(handleAdminSeed)))
+	mux.HandleFunc("/api/admin/escalation-policies", rateLimitMiddleware(orgMiddleware(handleEscalationPolicies)))
 	mux.HandleFunc("/api/budget/status", orgMiddleware(handleBudgetStatus))
 	mux.HandleFunc("/api/playground/models", authMiddleware(handlePlaygroundModels))
 	mux.HandleFunc("/api/playground/send", authMiddleware(handlePlaygroundSend))
@@ -279,20 +287,24 @@ func main() {
 	mux.HandleFunc("/api/prescriptive/", orgMiddleware(handlePrescriptiveRouter))
 	mux.HandleFunc("/api/monitoring/", orgMiddleware(handleMonitoringRouter))
 	mux.HandleFunc("/v1/health", authMiddleware(handleDashboardHealth))
+	mux.HandleFunc("/v1/health/all", authMiddleware(handleHealthAll))
 	mux.HandleFunc("/v1/dashboard/costs", orgMiddleware(handleCosts))
 	mux.HandleFunc("/v1/dashboard/summary", orgMiddleware(handleSummary))
 	mux.HandleFunc("/v1/dashboard/anomalies", orgMiddleware(handleAnomalies))
 	mux.HandleFunc("/v1/dashboard/events", authMiddleware(handleSSE))
-	mux.HandleFunc("/v1/admin/budget-rules", orgMiddleware(handleBudgetRules))
-	mux.HandleFunc("/v1/admin/teams", orgMiddleware(handleTeams))
-	mux.HandleFunc("/v1/admin/seed-demo", authMiddleware(handleAdminSeed))
-	mux.HandleFunc("/v1/admin/escalation-policies", orgMiddleware(handleEscalationPolicies))
+	mux.HandleFunc("/v1/admin/budget-rules", rateLimitMiddleware(orgMiddleware(handleBudgetRules)))
+	mux.HandleFunc("/v1/admin/teams", rateLimitMiddleware(orgMiddleware(handleTeams)))
+	mux.HandleFunc("/v1/admin/pricing", rateLimitMiddleware(orgMiddleware(handleAdminPricing)))
+	mux.HandleFunc("/v1/admin/pricing/", rateLimitMiddleware(orgMiddleware(handleAdminPricing)))
+	mux.HandleFunc("/v1/admin/seed-demo", rateLimitMiddleware(authMiddleware(handleAdminSeed)))
+	mux.HandleFunc("/v1/admin/escalation-policies", rateLimitMiddleware(orgMiddleware(handleEscalationPolicies)))
 	mux.HandleFunc("/v1/budget/status", orgMiddleware(handleBudgetStatus))
 	mux.HandleFunc("/v1/playground/models", authMiddleware(handlePlaygroundModels))
 	mux.HandleFunc("/v1/playground/send", authMiddleware(handlePlaygroundSend))
 	mux.HandleFunc("/v1/prescriptive/report/", handleReportFrontend)
 	mux.HandleFunc("/v1/prescriptive/", orgMiddleware(handlePrescriptiveRouter))
 	mux.HandleFunc("/v1/monitoring/", orgMiddleware(handleMonitoringRouter))
+	mux.HandleFunc("/static/styles.css", handleStaticCSS)
 	mux.HandleFunc("/assessments", handleAssessmentFrontend)
 	mux.HandleFunc("/dashboard", handleDashboard)
 	mux.HandleFunc("/", handleLanding)
@@ -1066,6 +1078,69 @@ func handleDashboardHealth(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": status})
 }
 
+type serviceHealth struct {
+	Service string `json:"service"`
+	Status  string `json:"status"`
+	Latency string `json:"latency,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+type healthAllResponse struct {
+	Status   string          `json:"status"`
+	Services []serviceHealth `json:"services"`
+}
+
+func handleHealthAll(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	var services []serviceHealth
+
+	// Redis health
+	start := time.Now()
+	if err := rdb.Ping(ctx).Err(); err != nil {
+		services = append(services, serviceHealth{Service: "redis", Status: "down", Error: err.Error(), Latency: time.Since(start).String()})
+	} else {
+		services = append(services, serviceHealth{Service: "redis", Status: "up", Latency: time.Since(start).String()})
+	}
+
+	// Postgres health
+	start = time.Now()
+	if err := db.PingContext(ctx); err != nil {
+		services = append(services, serviceHealth{Service: "postgres", Status: "down", Error: err.Error(), Latency: time.Since(start).String()})
+	} else {
+		services = append(services, serviceHealth{Service: "postgres", Status: "up", Latency: time.Since(start).String()})
+	}
+
+	// Go router health
+	start = time.Now()
+	routerURL := os.Getenv("ROUTER_URL")
+	if routerURL == "" {
+		routerURL = "http://go-router:8080"
+	}
+	if resp, err := http.Get(routerURL + "/health"); err != nil {
+		services = append(services, serviceHealth{Service: "go-router", Status: "down", Error: err.Error(), Latency: time.Since(start).String()})
+	} else {
+		resp.Body.Close()
+		status := "up"
+		if resp.StatusCode != http.StatusOK {
+			status = "degraded"
+		}
+		services = append(services, serviceHealth{Service: "go-router", Status: status, Latency: time.Since(start).String()})
+	}
+
+	overall := "healthy"
+	for _, s := range services {
+		if s.Status == "down" {
+			overall = "degraded"
+			break
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(healthAllResponse{Status: overall, Services: services})
+}
+
 var webhookClient = &http.Client{Timeout: 10 * time.Second}
 
 var (
@@ -1581,6 +1656,13 @@ func handleSSE(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+func handleStaticCSS(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	css, _ := staticCSS.ReadFile("static/styles.css")
+	w.Write(css)
 }
 
 func handleDashboard(w http.ResponseWriter, r *http.Request) {

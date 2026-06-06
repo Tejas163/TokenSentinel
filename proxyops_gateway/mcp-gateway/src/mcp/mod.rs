@@ -9,12 +9,37 @@ use transport::{JsonRpcRequest, JsonRpcResponse};
 use tools::list_tools;
 use crate::identity::AgentInfo;
 
-pub async fn dispatch(req: JsonRpcRequest, agent: AgentInfo) -> JsonRpcResponse {
-    match req.method.as_str() {
-        "tools/list" => handle_tools_list(req),
-        "tools/call" => handle_tools_call(req, agent).await,
-        _ => JsonRpcResponse::error(req.id, -32601, "Method not found"),
+fn truncate_args(args: &serde_json::Value, max_len: usize) -> String {
+    let s = serde_json::to_string(args).unwrap_or_default();
+    if s.len() > max_len {
+        format!("{}... (truncated)", &s[..max_len])
+    } else {
+        s
     }
+}
+
+pub async fn dispatch(req: JsonRpcRequest, agent: AgentInfo) -> JsonRpcResponse {
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let span = tracing::info_span!("dispatch", request_id = %request_id, method = %req.method);
+    let _enter = span.enter();
+
+    let resp = match req.method.as_str() {
+        "tools/list" => handle_tools_list(req),
+        "tools/call" => handle_tools_call(req, agent, &request_id).await,
+        _ => JsonRpcResponse::error(req.id, -32601, "Method not found"),
+    };
+
+    if resp.error.is_some() {
+        tracing::warn!(
+            request_id = %request_id,
+            method = %req.method,
+            error_code = resp.error.as_ref().map(|e| e.code),
+            error_message = resp.error.as_ref().map(|e| e.message.as_str()),
+            "rpc error"
+        );
+    }
+
+    resp
 }
 
 fn handle_tools_list(req: JsonRpcRequest) -> JsonRpcResponse {
@@ -22,7 +47,7 @@ fn handle_tools_list(req: JsonRpcRequest) -> JsonRpcResponse {
     JsonRpcResponse::success(req.id, serde_json::json!({ "tools": tools }))
 }
 
-async fn handle_tools_call(req: JsonRpcRequest, agent: AgentInfo) -> JsonRpcResponse {
+async fn handle_tools_call(req: JsonRpcRequest, agent: AgentInfo, request_id: &str) -> JsonRpcResponse {
     let tool_name = match req.params.as_ref()
         .and_then(|p| p.get("name"))
         .and_then(|n| n.as_str())
@@ -30,6 +55,21 @@ async fn handle_tools_call(req: JsonRpcRequest, agent: AgentInfo) -> JsonRpcResp
         Some(name) => name.to_string(),
         None => return JsonRpcResponse::error(req.id, -32602, "Missing required parameter: name"),
     };
+
+    let arguments = req.params.as_ref()
+        .and_then(|p| p.get("arguments"))
+        .cloned()
+        .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+
+    let args_truncated = truncate_args(&arguments, 200);
+
+    tracing::info!(
+        request_id = %request_id,
+        tool = %tool_name,
+        team = ?agent.team,
+        args = %args_truncated,
+        "tool call"
+    );
 
     if !agent.scopes.contains(&"*".to_string())
         && !agent.scopes.iter().any(|s| s == &format!("tools:{tool_name}"))
@@ -44,11 +84,6 @@ async fn handle_tools_call(req: JsonRpcRequest, agent: AgentInfo) -> JsonRpcResp
     if let Err(e) = budget::check_tool_allowed(&tool_name, agent.team.as_deref()).await {
         return JsonRpcResponse::error(req.id, -32000, &e);
     }
-
-    let arguments = req.params.as_ref()
-        .and_then(|p| p.get("arguments"))
-        .cloned()
-        .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
 
     if let Err(e) = validation::validate_tool_args(&tool_name, &arguments) {
         return JsonRpcResponse::error(req.id, -32602, &e);
@@ -109,10 +144,26 @@ async fn handle_tools_call(req: JsonRpcRequest, agent: AgentInfo) -> JsonRpcResp
     };
 
     match result {
-        Ok(value) => JsonRpcResponse::success(req.id, serde_json::json!({ "content": [
-            { "type": "text", "text": serde_json::to_string(&value).unwrap_or_default() }
-        ]})),
-        Err(e) => JsonRpcResponse::internal_error(req.id, &e),
+        Ok(value) => {
+            tracing::info!(
+                request_id = %request_id,
+                tool = %tool_name,
+                result_size = serde_json::to_string(&value).map(|s| s.len()).unwrap_or(0),
+                "tool success"
+            );
+            JsonRpcResponse::success(req.id, serde_json::json!({ "content": [
+                { "type": "text", "text": serde_json::to_string(&value).unwrap_or_default() }
+            ]}))
+        }
+        Err(e) => {
+            tracing::warn!(
+                request_id = %request_id,
+                tool = %tool_name,
+                error = %e,
+                "tool error"
+            );
+            JsonRpcResponse::internal_error(req.id, &e)
+        }
     }
 }
 

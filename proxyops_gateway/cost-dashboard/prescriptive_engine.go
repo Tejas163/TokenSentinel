@@ -78,16 +78,6 @@ var modelEquivalence = map[string][]string{
 	"llama-3-8b": {"gpt-3.5-turbo"},
 }
 
-func findModel(name string) *ModelInfo {
-	name = strings.ToLower(name)
-	for _, m := range modelCatalog {
-		if strings.EqualFold(m.Name, name) {
-			return &m
-		}
-	}
-	return nil
-}
-
 func RunAssessment(store Store, assessmentID int) (*AssessmentReport, error) {
 	a, err := store.GetAssessment(assessmentID)
 	if err != nil {

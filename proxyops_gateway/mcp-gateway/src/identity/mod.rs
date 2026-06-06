@@ -79,7 +79,7 @@ pub async fn auth_middleware(mut req: Request, next: Next) -> Result<Response, S
         return Err(StatusCode::UNAUTHORIZED);
     };
 
-    let team = scoping::team_for_api_key(used_key);
+    let team = scoping::team_for_api_key(used_key).await;
     req.extensions_mut().insert(AgentInfo {
         agent_id: None,
         team,
