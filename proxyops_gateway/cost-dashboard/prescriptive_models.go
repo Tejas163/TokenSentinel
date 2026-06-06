@@ -35,6 +35,7 @@ type TeamComposition struct {
 
 type Assessment struct {
 	ID                   int              `json:"id"`
+	OrgID                string           `json:"-"`
 	CompanyName          string           `json:"company_name"`
 	CloudVendor          string           `json:"cloud_vendor"`
 	GPUConfigs           []GPUConfig      `json:"gpu_configs"`
@@ -96,6 +97,7 @@ func initPrescriptiveTables(db *sql.DB) error {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS assessments (
 			id SERIAL PRIMARY KEY,
+			org_id TEXT NOT NULL DEFAULT '',
 			company_name TEXT NOT NULL,
 			cloud_vendor TEXT NOT NULL DEFAULT '',
 			gpu_configs JSONB DEFAULT '[]',
@@ -109,6 +111,7 @@ func initPrescriptiveTables(db *sql.DB) error {
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
+		`ALTER TABLE assessments ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT ''`,
 		`CREATE TABLE IF NOT EXISTS recommendations (
 			id SERIAL PRIMARY KEY,
 			assessment_id INTEGER NOT NULL REFERENCES assessments(id) ON DELETE CASCADE,

@@ -80,7 +80,6 @@ mod tests {
     #[test]
     fn test_metrics_by_path_init() {
         let m = Metrics::new();
-        use std::sync::atomic::Ordering;
         assert!(m.requests_by_path.contains_key("/health"));
         assert!(m.requests_by_path.contains_key("/metrics"));
     }

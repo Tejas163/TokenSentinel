@@ -141,9 +141,19 @@ func handleAssessmentVersions(w http.ResponseWriter, r *http.Request) {
 func listAssessments(w http.ResponseWriter, r *http.Request) {
 	limit := parseIntParam(r, "limit", 100)
 	offset := parseIntParam(r, "offset", 0)
-	rows, err := db.Query(`SELECT id, company_name, cloud_vendor, gpu_configs, monthly_request_volume,
-		token_distribution, current_monthly_spend, providers_used, team_composition, source, version, created_at, updated_at
-		FROM assessments ORDER BY updated_at DESC LIMIT $1 OFFSET $2`, limit, offset)
+	orgID := getOrgID(r)
+
+	var rows *sql.Rows
+	var err error
+	if orgID != "" {
+		rows, err = db.Query(`SELECT id, org_id, company_name, cloud_vendor, gpu_configs, monthly_request_volume,
+			token_distribution, current_monthly_spend, providers_used, team_composition, source, version, created_at, updated_at
+			FROM assessments WHERE org_id = $1 ORDER BY updated_at DESC LIMIT $2 OFFSET $3`, orgID, limit, offset)
+	} else {
+		rows, err = db.Query(`SELECT id, org_id, company_name, cloud_vendor, gpu_configs, monthly_request_volume,
+			token_distribution, current_monthly_spend, providers_used, team_composition, source, version, created_at, updated_at
+			FROM assessments ORDER BY updated_at DESC LIMIT $1 OFFSET $2`, limit, offset)
+	}
 	if err != nil {
 		log.Printf("list assessments error: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -156,7 +166,7 @@ func listAssessments(w http.ResponseWriter, r *http.Request) {
 		var a Assessment
 		var gpuJSON, tokenJSON, providerJSON, teamJSON []byte
 		var createdAt, updatedAt time.Time
-		if err := rows.Scan(&a.ID, &a.CompanyName, &a.CloudVendor, &gpuJSON, &a.MonthlyRequestVolume,
+		if err := rows.Scan(&a.ID, &a.OrgID, &a.CompanyName, &a.CloudVendor, &gpuJSON, &a.MonthlyRequestVolume,
 			&tokenJSON, &a.CurrentMonthlySpend, &providerJSON, &teamJSON, &a.Source, &a.Version, &createdAt, &updatedAt); err != nil {
 			log.Printf("scan assessment: %v", err)
 			continue
@@ -198,6 +208,7 @@ func createAssessment(w http.ResponseWriter, r *http.Request) {
 	if a.TokenDistribution.InputPct == 0 && a.TokenDistribution.OutputPct == 0 {
 		a.TokenDistribution = TokenDistribution{InputPct: 0.7, OutputPct: 0.3}
 	}
+	a.OrgID = getOrgID(r)
 
 	gpuJSON, _ := json.Marshal(a.GPUConfigs)
 	tokenJSON, _ := json.Marshal(a.TokenDistribution)
@@ -205,10 +216,10 @@ func createAssessment(w http.ResponseWriter, r *http.Request) {
 	teamJSON, _ := json.Marshal(a.TeamComposition)
 
 	var id int
-	err := db.QueryRow(`INSERT INTO assessments (company_name, cloud_vendor, gpu_configs, monthly_request_volume,
+	err := db.QueryRow(`INSERT INTO assessments (org_id, company_name, cloud_vendor, gpu_configs, monthly_request_volume,
 		token_distribution, current_monthly_spend, providers_used, team_composition, source)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-		a.CompanyName, a.CloudVendor, gpuJSON, a.MonthlyRequestVolume,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+		a.OrgID, a.CompanyName, a.CloudVendor, gpuJSON, a.MonthlyRequestVolume,
 		tokenJSON, a.CurrentMonthlySpend, providerJSON, teamJSON, a.Source,
 	).Scan(&id)
 	if err != nil {
