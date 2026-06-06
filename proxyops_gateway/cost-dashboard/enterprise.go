@@ -27,7 +27,7 @@ var enterpriseEmailTo string
 func init() {
 	enterpriseEmailTo = os.Getenv("ENTERPRISE_EMAIL_TO")
 	if enterpriseEmailTo == "" {
-		enterpriseEmailTo = "tejas.163@example.com"
+		enterpriseEmailTo = "tejaskrshna@gmail.com"
 	}
 }
 
