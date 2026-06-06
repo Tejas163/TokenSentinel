@@ -19,19 +19,23 @@ func init() {
 }
 
 func handleReport(w http.ResponseWriter, r *http.Request, id int) {
-	accept := r.Header.Get("Accept")
-	if strings.Contains(accept, "text/html") || strings.HasPrefix(accept, "*/*") || accept == "" {
-		reportTmpl.Execute(w, map[string]string{"APIKey": authAPIKey})
-		return
-	}
-
 	report, err := GetReport(appStore, id)
 	if err != nil {
 		log.Printf("get report error: %v", err)
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
+
+	accept := r.Header.Get("Accept")
+	if strings.Contains(accept, "text/html") || strings.HasPrefix(accept, "*/*") || accept == "" {
+		reportJSON, _ := json.Marshal(report)
+		reportTmpl.Execute(w, map[string]interface{}{
+			"APIKey":     authAPIKey,
+			"ReportJSON": template.JS(reportJSON),
+		})
+		return
+	}
+
 	encodeJSON(w, report)
 }
 

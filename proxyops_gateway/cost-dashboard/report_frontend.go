@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"html/template"
 	"net/http"
 	"strconv"
 	"strings"
@@ -23,16 +25,15 @@ func handleReportFrontend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(parts) == 1 {
-		key := r.Header.Get("X-Api-Key")
-		if key == "" {
-			if b := r.Header.Get("Authorization"); len(b) > 7 && strings.EqualFold(b[:7], "Bearer ") {
-				key = b[7:]
+		if strings.Contains(r.Header.Get("Accept"), "application/json") {
+			key := r.Header.Get("X-Api-Key")
+			if key == "" {
+				key = r.URL.Query().Get("api_key")
 			}
-		}
-		if key == "" {
-			key = r.URL.Query().Get("api_key")
-		}
-		if key == authAPIKey {
+			if key == "" || key != authAPIKey {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
 			report, err := GetReport(appStore, id)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusNotFound)
@@ -42,7 +43,16 @@ func handleReportFrontend(w http.ResponseWriter, r *http.Request) {
 			encodeJSON(w, report)
 			return
 		}
-		reportTmpl.Execute(w, map[string]string{"APIKey": authAPIKey})
+		report, err := GetReport(appStore, id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		reportJSON, _ := json.Marshal(report)
+		reportTmpl.Execute(w, map[string]interface{}{
+			"APIKey":     authAPIKey,
+			"ReportJSON": template.JS(reportJSON),
+		})
 		return
 	}
 
