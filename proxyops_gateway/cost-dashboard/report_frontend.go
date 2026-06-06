@@ -25,15 +25,11 @@ func handleReportFrontend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(parts) == 1 {
-		if strings.Contains(r.Header.Get("Accept"), "application/json") {
-			key := r.Header.Get("X-Api-Key")
-			if key == "" {
-				key = r.URL.Query().Get("api_key")
-			}
-			if key == "" || key != authAPIKey {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
-				return
-			}
+		key := r.Header.Get("X-Api-Key")
+		if key == "" {
+			key = r.URL.Query().Get("api_key")
+		}
+		if key != "" && key == authAPIKey {
 			report, err := GetReport(appStore, id)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusNotFound)
