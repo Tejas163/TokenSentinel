@@ -9,6 +9,7 @@ use axum::{
 use uuid::Uuid;
 
 #[derive(Clone,Debug)]
+#[allow(dead_code)]
 pub struct RequestId(pub String);
 
 pub async fn request_id_middleware(mut req: Request<Body>, next: Next) -> Result<Response<Body>, StatusCode> {

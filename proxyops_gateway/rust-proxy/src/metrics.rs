@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
 
 #[derive(Clone)]
 pub struct Metrics {
     pub requests_total: Arc<AtomicU64>,
     pub requests_active: Arc<AtomicU64>,
+    #[allow(dead_code)]
     pub requests_by_path: Arc<HashMap<String, Arc<AtomicU64>>>,
     pub latency_ms_sum: Arc<AtomicU64>,
     pub latency_ms_count: Arc<AtomicU64>,
@@ -44,6 +45,7 @@ mod tests {
     #[test]
     fn test_metrics_new() {
         let m = Metrics::new();
+        use std::sync::atomic::Ordering;
         assert_eq!(m.requests_total.load(Ordering::Relaxed), 0);
         assert_eq!(m.requests_active.load(Ordering::Relaxed), 0);
         assert_eq!(m.latency_ms_sum.load(Ordering::Relaxed), 0);
@@ -55,6 +57,7 @@ mod tests {
     #[test]
     fn test_metrics_increment() {
         let m = Metrics::new();
+        use std::sync::atomic::Ordering;
         m.requests_total.fetch_add(5, Ordering::Relaxed);
         assert_eq!(m.requests_total.load(Ordering::Relaxed), 5);
         m.upstream_errors.fetch_add(2, Ordering::Relaxed);
@@ -69,6 +72,7 @@ mod tests {
     fn test_metrics_clone_independent() {
         let m1 = Metrics::new();
         let m2 = m1.clone();
+        use std::sync::atomic::Ordering;
         m1.requests_total.fetch_add(1, Ordering::Relaxed);
         assert_eq!(m2.requests_total.load(Ordering::Relaxed), 1);
     }
@@ -76,6 +80,7 @@ mod tests {
     #[test]
     fn test_metrics_by_path_init() {
         let m = Metrics::new();
+        use std::sync::atomic::Ordering;
         assert!(m.requests_by_path.contains_key("/health"));
         assert!(m.requests_by_path.contains_key("/metrics"));
     }
