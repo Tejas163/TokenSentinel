@@ -62,13 +62,11 @@ async fn main() {
     let mcp_routes = Router::new()
         .route("/{*path}", get(mcp_handler).post(mcp_handler))
         .layer(axum::middleware::from_fn(request_id::request_id_middleware))
-        .layer(axum::middleware::from_fn(metrics_middleware))
         .layer(TraceLayer::new_for_http());
 
     let proxy_routes = Router::new()
         .route("/{*path}", get(handler).post(handler))
         .layer(axum::middleware::from_fn(request_id::request_id_middleware))
-        .layer(axum::middleware::from_fn(metrics_middleware))
         .layer(TraceLayer::new_for_http());
 
     let app = Router::new()
@@ -76,7 +74,8 @@ async fn main() {
         .route("/metrics", get(metrics_handler))
         .nest("/mcp", mcp_routes)
         .merge(proxy_routes)
-        .with_state(state);
+        .with_state(state.clone())
+        .layer(axum::middleware::from_fn_with_state(state, metrics_middleware));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     tracing::info!("rust-proxy listening on :3000");
