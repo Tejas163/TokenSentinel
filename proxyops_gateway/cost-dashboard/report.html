@@ -118,7 +118,8 @@
 let reportData = null;
 let whatIfBase = null;
 let assessmentId = null;
-const API_KEY = new URLSearchParams(window.location.search).get('api_key') || '';
+const TEMPLATE_KEY = '{{.APIKey}}';
+const API_KEY = TEMPLATE_KEY || new URLSearchParams(window.location.search).get('api_key') || '';
 
 function getAssessmentId() {
   var parts = window.location.pathname.split('/');
@@ -158,8 +159,9 @@ async function loadReport() {
 function render() {
   var d = reportData;
   document.getElementById('report-subtitle').textContent = d.assessment.company_name + ' — v' + d.assessment.version;
-  document.getElementById('csv-download').href = '/api/prescriptive/report/' + assessmentId + '/csv';
-  document.getElementById('pdf-download').href = '/api/prescriptive/report/' + assessmentId + '/pdf';
+  var qs = API_KEY ? '?api_key=' + encodeURIComponent(API_KEY) : '';
+  document.getElementById('csv-download').href = '/api/prescriptive/report/' + assessmentId + '/csv' + qs;
+  document.getElementById('pdf-download').href = '/api/prescriptive/report/' + assessmentId + '/pdf' + qs;
 
   renderSummary(d);
   renderBreakdown(d);

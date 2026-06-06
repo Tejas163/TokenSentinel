@@ -36,13 +36,13 @@ The system is fully built and verified end-to-end:
 
 ## Business Model
 
-Open-source core (Apache 2.0) with paid enterprise tiers:
+Open-source core (Apache 2.0) with paid managed tiers:
 
 | Tier | Price | What's included |
 |------|-------|----------------|
-| **Community** | Free | Full gateway, dashboard, SDK, community support |
-| **Team** | $999/mo | SSO/SAML, audit logs, priority support, custom rate limits |
-| **Enterprise** | Custom | Dedicated support, on-prem deployment, SLA, custom policies |
+| **Open Source** | Free | Full gateway, dashboard, SDK, prescriptive engine, community support |
+| **Managed Cloud** | $799/mo | Fully hosted, SAML/SSO, audit logs (90-day), 99.9% SLA, priority support |
+| **Enterprise** | $1,999/mo | Dedicated infrastructure, on-premise available, custom SLA, white-label branding, dedicated support engineer |
 
 ## Market
 
@@ -55,8 +55,8 @@ The market is flooding with new LLM providers. Companies want multi-provider str
 ## The Ask
 
 Raising a seed round to:
-- Build the managed cloud offering (hosted gateway, zero-devops deploy)
-- Add SSO, audit trails, role-based access control
+- Scale the managed cloud offering (multi-region, global footprint)
+- Expand the prescriptive assessment engine with real-time optimization
 - Hire a founding engineer and a developer advocate
 - Compete with the closed-source alternatives (Portkey, Helicone) on openness and price
 

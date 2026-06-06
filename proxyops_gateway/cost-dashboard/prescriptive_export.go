@@ -1,11 +1,11 @@
 package main
 
 import (
-	"database/sql"
 	"encoding/csv"
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/johnfercher/maroto/v2"
@@ -29,61 +29,67 @@ func handleReportDownload(w http.ResponseWriter, r *http.Request, id int, format
 }
 
 func exportCSV(w http.ResponseWriter, assessmentID int) {
-	rows, err := db.Query(`SELECT model, provider, current_monthly_cost, projected_monthly_cost,
-		input_tokens_millions, output_tokens_millions, scenario
-		FROM cost_projections WHERE assessment_id = $1 ORDER BY scenario, current_monthly_cost DESC`, assessmentID)
+	report, err := GetReport(appStore, assessmentID)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			http.Error(w, "no data", http.StatusNotFound)
-			return
-		}
-		log.Printf("csv export query error: %v", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		log.Printf("csv export: %v", err)
+		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	defer rows.Close()
 
 	w.Header().Set("Content-Type", "text/csv")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=assessment-%d-report.csv", assessmentID))
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=TokenSentinel_Assessment_%d_Report.csv", assessmentID))
 
 	writer := csv.NewWriter(w)
-	writer.Write([]string{"Model", "Provider", "Current Monthly Cost", "Projected Monthly Cost", "Input Tokens (M)", "Output Tokens (M)", "Scenario"})
+	writer.Write([]string{fmt.Sprintf("TokenSentinel Prescriptive Assessment Report — %s", report.Assessment.CompanyName)})
+	writer.Write([]string{fmt.Sprintf("Generated: %s", time.Now().UTC().Format("January 02, 2006 15:04 UTC"))})
+	writer.Write([]string{fmt.Sprintf("Version: %d", report.Assessment.Version)})
+	writer.Write([]string{})
 
-	for rows.Next() {
-		var model, provider, scenario string
-		var currentCost, projectedCost, inputM, outputM float64
-		if err := rows.Scan(&model, &provider, &currentCost, &projectedCost, &inputM, &outputM, &scenario); err != nil {
-			log.Printf("csv export scan projection: %v", err)
-			continue
-		}
+	writer.Write([]string{"EXECUTIVE SUMMARY"})
+	writer.Write([]string{"Metric", "Value"})
+	writer.Write([]string{"Current Monthly Spend", fmt.Sprintf("$%.2f", report.TotalCurrent)})
+	writer.Write([]string{"Projected Monthly Spend", fmt.Sprintf("$%.2f", report.TotalProjected)})
+	writer.Write([]string{"Projected Monthly Savings", fmt.Sprintf("$%.2f", report.TotalSavings)})
+	if report.TotalCurrent > 0 {
+		writer.Write([]string{"Savings Rate", fmt.Sprintf("%.1f%%", (report.TotalSavings/report.TotalCurrent)*100)})
+	}
+	writer.Write([]string{})
+
+	writer.Write([]string{"COST BREAKDOWN BY MODEL"})
+	writer.Write([]string{"Model", "Provider", "Input Tokens (M)", "Output Tokens (M)", "Current Monthly Cost", "Projected Monthly Cost"})
+	for _, cp := range report.CostBreakdown {
 		writer.Write([]string{
-			model,
-			provider,
-			fmt.Sprintf("%.2f", currentCost),
-			fmt.Sprintf("%.2f", projectedCost),
-			fmt.Sprintf("%.4f", inputM),
-			fmt.Sprintf("%.4f", outputM),
-			scenario,
+			cp.Model,
+			cp.Provider,
+			fmt.Sprintf("%.2f", cp.InputTokensMillions),
+			fmt.Sprintf("%.2f", cp.OutputTokensMillions),
+			fmt.Sprintf("%.2f", cp.CurrentMonthlyCost),
+			fmt.Sprintf("%.2f", cp.ProjectedMonthlyCost),
 		})
 	}
+	writer.Write([]string{})
 
-	recRows, err := db.Query(`SELECT category, description, current_cost, projected_cost, monthly_savings, payback_period_days, priority
-		FROM recommendations WHERE assessment_id = $1 ORDER BY monthly_savings DESC`, assessmentID)
-	if err == nil {
-		defer recRows.Close()
-		writer.Write([]string{})
-		writer.Write([]string{"Recommendations"})
-		writer.Write([]string{"Category", "Description", "Current Cost", "Projected Cost", "Monthly Savings", "Payback (Days)", "Priority"})
-		for recRows.Next() {
-			var cat, desc, priority string
-			var currentCost, projectedCost, savings float64
-			var payback int
-			if err := recRows.Scan(&cat, &desc, &currentCost, &projectedCost, &savings, &payback, &priority); err != nil {
-				log.Printf("csv export scan recommendation: %v", err)
-				continue
-			}
-			writer.Write([]string{cat, desc, fmt.Sprintf("%.2f", currentCost), fmt.Sprintf("%.2f", projectedCost), fmt.Sprintf("%.2f", savings), fmt.Sprintf("%d", payback), priority})
+	writer.Write([]string{"RECOMMENDATIONS"})
+	writer.Write([]string{"Priority", "Category", "Description", "Current Cost", "Projected Cost", "Monthly Savings", "Payback Period (Days)"})
+	for _, r := range report.Recommendations {
+		writer.Write([]string{
+			r.Priority,
+			r.Category,
+			r.Description,
+			fmt.Sprintf("%.2f", r.CurrentCost),
+			fmt.Sprintf("%.2f", r.ProjectedCost),
+			fmt.Sprintf("%.2f", r.MonthlySavings),
+			fmt.Sprintf("%d", r.PaybackPeriodDays),
+		})
+	}
+	writer.Write([]string{})
+
+	if len(report.Recommendations) > 0 {
+		totalSavings := 0.0
+		for _, r := range report.Recommendations {
+			totalSavings += r.MonthlySavings
 		}
+		writer.Write([]string{"Total Potential Monthly Savings from Recommendations", fmt.Sprintf("$%.2f", totalSavings)})
 	}
 
 	writer.Flush()
@@ -98,48 +104,88 @@ func exportPDF(w http.ResponseWriter, assessmentID int) {
 	}
 
 	w.Header().Set("Content-Type", "application/pdf")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=assessment-%d-report.pdf", assessmentID))
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=TokenSentinel_Assessment_%d_Report.pdf", assessmentID))
 	generatePDF(w, report)
 }
 
 func generatePDF(w http.ResponseWriter, report *AssessmentReport) {
 	m := maroto.New()
 
-	m.AddRow(20).Add(text.NewCol(12, "TokenSentinel Prescriptive Report", props.Text{
+	m.AddRow(20).Add(text.NewCol(12, "TokenSentinel Prescriptive Assessment Report", props.Text{
 		Style: fontstyle.Bold,
-		Size:  16,
+		Size:  18,
 		Align: align.Center,
 	}))
+	m.AddRow(8).Add(text.NewCol(12, fmt.Sprintf("Prepared for: %s", report.Assessment.CompanyName), props.Text{
+		Size: 12, Align: align.Center,
+	}))
+	m.AddRow(8).Add(text.NewCol(12, fmt.Sprintf("Report Date: %s", time.Now().UTC().Format("January 02, 2006")), props.Text{
+		Size: 10, Align: align.Center,
+	}))
+	m.AddRow(12).Add(text.NewCol(12, "", props.Text{}))
 
-	m.AddRow(10).Add(text.NewCol(12, fmt.Sprintf("Company: %s", report.Assessment.CompanyName), props.Text{Size: 11}))
-	m.AddRow(8).Add(text.NewCol(12, fmt.Sprintf("Version: %d", report.Assessment.Version), props.Text{Size: 10}))
-	m.AddRow(8).Add(text.NewCol(12, fmt.Sprintf("Generated: %s", time.Now().UTC().Format("2006-01-02 15:04 UTC")), props.Text{Size: 10}))
-
-	m.AddRow(10).Add(text.NewCol(12, "Executive Summary", props.Text{Style: fontstyle.Bold, Size: 13}))
-	m.AddRow(8).Add(text.NewCol(12, fmt.Sprintf("Current Monthly Spend:  $%.2f", report.TotalCurrent), props.Text{Size: 10}))
-	m.AddRow(8).Add(text.NewCol(12, fmt.Sprintf("Projected Monthly Spend: $%.2f", report.TotalProjected), props.Text{Size: 10}))
-	m.AddRow(8).Add(text.NewCol(12, fmt.Sprintf("Projected Monthly Savings: $%.2f", report.TotalSavings), props.Text{Size: 10}))
 	if report.TotalCurrent > 0 {
-		m.AddRow(8).Add(text.NewCol(12, fmt.Sprintf("Savings Rate: %.1f%%", (report.TotalSavings/report.TotalCurrent)*100), props.Text{Size: 10}))
+		savingsRate := (report.TotalSavings / report.TotalCurrent) * 100
+		m.AddRow(20).Add(text.NewCol(12, fmt.Sprintf("Total Potential Savings: $%.0f/mo (%.0f%%)",
+			report.TotalSavings, savingsRate), props.Text{
+			Style: fontstyle.Bold,
+			Size:  14,
+			Align: align.Center,
+		}))
+		m.AddRow(12).Add(text.NewCol(12, "", props.Text{}))
 	}
 
+	m.AddRow(12).Add(text.NewCol(12, "1. Executive Summary", props.Text{Style: fontstyle.Bold, Size: 14}))
+	m.AddRow(8).Add(text.NewCol(12, fmt.Sprintf("Your current monthly AI infrastructure spend is $%.2f.", report.TotalCurrent), props.Text{Size: 10}))
+	m.AddRow(8).Add(text.NewCol(12, fmt.Sprintf("After applying the recommended optimizations in this report, your projected monthly spend is $%.2f.", report.TotalProjected), props.Text{Size: 10}))
+	m.AddRow(8).Add(text.NewCol(12, fmt.Sprintf("This represents a potential savings of $%.2f per month.", report.TotalSavings), props.Text{Size: 10}))
+	if report.TotalCurrent > 0 {
+		m.AddRow(8).Add(text.NewCol(12, fmt.Sprintf("Your estimated savings rate is %.1f%%, meaning you could reduce your AI costs by nearly %.0f%% with the changes outlined below.",
+			(report.TotalSavings/report.TotalCurrent)*100, (report.TotalSavings/report.TotalCurrent)*100), props.Text{Size: 10}))
+	}
+	m.AddRow(10).Add(text.NewCol(12, "", props.Text{}))
+
 	if len(report.Recommendations) > 0 {
-		m.AddRow(10).Add(text.NewCol(12, "Top Recommendation", props.Text{Style: fontstyle.Bold, Size: 13}))
-		r := report.Recommendations[0]
-		m.AddRow(8).Add(text.NewCol(12, fmt.Sprintf("[%s] %s", r.Priority, r.Description), props.Text{Size: 10}))
-		m.AddRow(8).Add(text.NewCol(12, fmt.Sprintf("Monthly Savings: $%.2f", r.MonthlySavings), props.Text{Size: 10}))
+		m.AddRow(12).Add(text.NewCol(12, "2. Recommendations", props.Text{Style: fontstyle.Bold, Size: 14}))
+		m.AddRow(8).Add(text.NewCol(12, "The following recommendations are ranked by potential impact. Each includes an estimated monthly savings and a payback period indicating how quickly the change pays for itself.", props.Text{Size: 10}))
+
+		for i, r := range report.Recommendations {
+			if i > 0 {
+				m.AddRow(4).Add(text.NewCol(12, "", props.Text{}))
+			}
+			m.AddRows(row.New(10).Add(
+				col.New(1).Add(text.New(fmt.Sprintf("%d.", i+1), props.Text{Style: fontstyle.Bold, Size: 10})),
+				col.New(2).Add(text.New(strings.ToUpper(r.Priority), props.Text{
+					Style: fontstyle.Bold, Size: 9,
+				})),
+				col.New(9).Add(text.New(fmt.Sprintf("$%.0f/mo savings", r.MonthlySavings), props.Text{
+					Size: 10,
+				})),
+			))
+			m.AddRows(row.New(14).Add(
+				col.New(1).Add(text.New("", props.Text{Size: 8})),
+				col.New(11).Add(text.New(r.Description, props.Text{Size: 10})),
+			))
+			m.AddRows(row.New(8).Add(
+				col.New(1).Add(text.New("", props.Text{Size: 8})),
+				col.New(11).Add(text.New(fmt.Sprintf("Category: %s | Current spend: $%.0f/mo | Payback: %d days",
+					strings.ReplaceAll(r.Category, "_", " "), r.CurrentCost, r.PaybackPeriodDays), props.Text{Size: 8})),
+			))
+		}
+		m.AddRow(10).Add(text.NewCol(12, "", props.Text{}))
 	}
 
 	if len(report.CostBreakdown) > 0 {
-		m.AddRow(10).Add(text.NewCol(12, "Cost Breakdown by Model", props.Text{Style: fontstyle.Bold, Size: 13}))
+		m.AddRow(12).Add(text.NewCol(12, "3. Cost Breakdown by Model", props.Text{Style: fontstyle.Bold, Size: 14}))
+		m.AddRow(8).Add(text.NewCol(12, "The table below shows your current spending by model and what each line item would cost after implementing all recommendations.", props.Text{Size: 10}))
 
 		m.AddRows(row.New(10).Add(
 			col.New(3).Add(text.New("Model", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Left})),
 			col.New(2).Add(text.New("Provider", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Left})),
-			col.New(2).Add(text.New("Input (M)", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Right})),
-			col.New(2).Add(text.New("Output (M)", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Right})),
+			col.New(2).Add(text.New("Input (M tokens)", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Right})),
+			col.New(2).Add(text.New("Output (M tokens)", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Right})),
 			col.New(2).Add(text.New("Current/Mo", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Right})),
-			col.New(1).Add(text.New("Proj/Mo", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Right})),
+			col.New(1).Add(text.New("Projected", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Right})),
 		))
 
 		for _, cp := range report.CostBreakdown {
@@ -152,7 +198,19 @@ func generatePDF(w http.ResponseWriter, report *AssessmentReport) {
 				col.New(1).Add(text.New(fmt.Sprintf("$%.0f", cp.ProjectedMonthlyCost), props.Text{Size: 8, Align: align.Right})),
 			))
 		}
+		m.AddRow(10).Add(text.NewCol(12, "", props.Text{}))
 	}
+
+	m.AddRow(12).Add(text.NewCol(12, "4. Next Steps", props.Text{Style: fontstyle.Bold, Size: 14}))
+	m.AddRow(8).Add(text.NewCol(12, "1. Review each recommendation with your engineering team to assess feasibility.", props.Text{Size: 10}))
+	m.AddRow(8).Add(text.NewCol(12, "2. Start with high-priority items that offer the fastest payback period.", props.Text{Size: 10}))
+	m.AddRow(8).Add(text.NewCol(12, "3. Use the What-If Simulator in your dashboard to model additional scenarios.", props.Text{Size: 10}))
+	m.AddRow(8).Add(text.NewCol(12, "4. Re-run this assessment after implementing changes to track your savings.", props.Text{Size: 10}))
+	m.AddRow(8).Add(text.NewCol(12, "5. Contact TokenSentinel support for help with implementation.", props.Text{Size: 10}))
+
+	m.AddRow(20).Add(text.NewCol(12, fmt.Sprintf("TokenSentinel — %s", time.Now().UTC().Format("2006")), props.Text{
+		Size: 8, Align: align.Center,
+	}))
 
 	document, err := m.Generate()
 	if err != nil {

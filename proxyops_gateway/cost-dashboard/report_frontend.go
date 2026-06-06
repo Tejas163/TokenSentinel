@@ -42,7 +42,7 @@ func handleReportFrontend(w http.ResponseWriter, r *http.Request) {
 			encodeJSON(w, report)
 			return
 		}
-		reportTmpl.Execute(w, map[string]string{"APIKey": ""})
+		reportTmpl.Execute(w, map[string]string{"APIKey": authAPIKey})
 		return
 	}
 
