@@ -23,6 +23,7 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/proxyops/internal/engine"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -125,7 +126,7 @@ var (
 	tmpls          *template.Template
 	authAPIKey     string
 	events         = newSSEBroker()
-	appStore       Store
+	appStore       engine.Store
 	anomalyZScore  = 3.0
 
 	monitoringInterval = 5 * time.Minute

@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/proxyops/internal/engine"
 )
 
 func syncModelCatalogToRedis(ctx context.Context) {
@@ -15,7 +17,7 @@ func syncModelCatalogToRedis(ctx context.Context) {
 		log.Printf("pricing: redis unavailable, skipping catalog sync: %v", err)
 		return
 	}
-	for _, m := range modelCatalog {
+	for _, m := range engine.ModelCatalog {
 		key := fmt.Sprintf("pricing:%s", m.Name)
 		data := map[string]interface{}{
 			"name":         m.Name,
@@ -28,10 +30,10 @@ func syncModelCatalogToRedis(ctx context.Context) {
 			log.Printf("pricing: failed to sync %s: %v", m.Name, err)
 		}
 	}
-	log.Printf("pricing: synced %d models to redis", len(modelCatalog))
+	log.Printf("pricing: synced %d models to redis", len(engine.ModelCatalog))
 }
 
-func findModelFromRedis(ctx context.Context, name string) *ModelInfo {
+func findModelFromRedis(ctx context.Context, name string) *engine.ModelInfo {
 	if rdb == nil {
 		return nil
 	}
@@ -40,7 +42,7 @@ func findModelFromRedis(ctx context.Context, name string) *ModelInfo {
 	if err != nil || len(data) == 0 {
 		return nil
 	}
-	mi := &ModelInfo{Name: name}
+	mi := &engine.ModelInfo{Name: name}
 	if v, ok := data["provider"]; ok {
 		mi.Provider = v
 	}
@@ -53,19 +55,19 @@ func findModelFromRedis(ctx context.Context, name string) *ModelInfo {
 	if v, ok := data["tier"]; ok {
 		var t int
 		fmt.Sscanf(v, "%d", &t)
-		mi.Tier = ModelTier(t)
+		mi.Tier = engine.ModelTier(t)
 	}
 	return mi
 }
 
-func findModel(name string) *ModelInfo {
+func findModel(name string) *engine.ModelInfo {
 	name = strings.ToLower(name)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if mi := findModelFromRedis(ctx, name); mi != nil {
 		return mi
 	}
-	for _, m := range modelCatalog {
+	for _, m := range engine.ModelCatalog {
 		if strings.EqualFold(m.Name, name) {
 			return &m
 		}
@@ -127,7 +129,7 @@ func getAllPricing(ctx context.Context) []pricingEntry {
 		}
 	}
 
-	for _, m := range modelCatalog {
+	for _, m := range engine.ModelCatalog {
 		if !seen[m.Name] {
 			entries = append(entries, pricingEntry{
 				Name:        m.Name,

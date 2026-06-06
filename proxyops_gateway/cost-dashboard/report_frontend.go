@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/proxyops/internal/engine"
 )
 
 func handleReportFrontend(w http.ResponseWriter, r *http.Request) {
@@ -30,7 +32,7 @@ func handleReportFrontend(w http.ResponseWriter, r *http.Request) {
 			key = r.URL.Query().Get("api_key")
 		}
 		if key != "" && key == authAPIKey {
-			report, err := GetReport(appStore, id)
+			report, err := engine.GetReport(appStore, id)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusNotFound)
 				return
@@ -39,7 +41,7 @@ func handleReportFrontend(w http.ResponseWriter, r *http.Request) {
 			encodeJSON(w, report)
 			return
 		}
-		report, err := GetReport(appStore, id)
+		report, err := engine.GetReport(appStore, id)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return

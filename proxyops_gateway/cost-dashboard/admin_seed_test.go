@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/proxyops/internal/engine"
 )
 
 func TestHandleAdminSeed_methodNotAllowed(t *testing.T) {
@@ -31,23 +32,24 @@ func TestHandleAdminSeed_existingAssessment(t *testing.T) {
 	seedLimits = make(map[string]time.Time)
 	seedLimiterMu.Unlock()
 
-	appStore = newMemStore()
-	aid := appStore.(*memStore).addAssessment(&Assessment{
+	appStore = engine.NewMemStore()
+	store := appStore.(*engine.MemStore)
+	aid := store.AddAssessment(&engine.Assessment{
 		CompanyName:          demoAssessmentName,
 		CloudVendor:          "aws",
 		MonthlyRequestVolume: 1000000,
-		GPUConfigs: []GPUConfig{
+		GPUConfigs: []engine.GPUConfig{
 			{Type: "A100", Count: 4, Region: "us-east-1", HourlyPrice: 3.50, Reserved: true},
 			{Type: "H100", Count: 2, Region: "us-west-2", HourlyPrice: 4.50, Reserved: false},
 		},
-		TokenDistribution:   TokenDistribution{InputPct: 0.75, OutputPct: 0.25},
+		TokenDistribution:   engine.TokenDistribution{InputPct: 0.75, OutputPct: 0.25},
 		CurrentMonthlySpend: 12000,
-		ProvidersUsed: []ProviderUsage{
+		ProvidersUsed: []engine.ProviderUsage{
 			{Name: "openai", Models: []string{"gpt-4o", "gpt-4o-mini", "gpt-4-turbo"}, MonthlySpend: 7000},
 			{Name: "anthropic", Models: []string{"claude-3-opus", "claude-3-sonnet"}, MonthlySpend: 3000},
 			{Name: "self-hosted", Models: []string{"llama-3-70b", "mixtral-8x7b"}, MonthlySpend: 2000},
 		},
-		TeamComposition: TeamComposition{Developers: 20, PlatformEngineers: 3, DevOps: 2, Management: 2},
+		TeamComposition: engine.TeamComposition{Developers: 20, PlatformEngineers: 3, DevOps: 2, Management: 2},
 		Source:          "manual",
 	})
 
@@ -125,7 +127,7 @@ func TestHandleAdminSeed_newAssessment(t *testing.T) {
 		WithArgs("DemoCorp", "aws", sqlmock.AnyArg(), 1000000, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), "manual", 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(99))
 
-	appStore = newMemStore()
+	appStore = engine.NewMemStore()
 
 	origRNG := seedRNG
 	seedRNG = rand.New(rand.NewSource(99))

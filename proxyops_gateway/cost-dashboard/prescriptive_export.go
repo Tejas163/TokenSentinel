@@ -15,6 +15,7 @@ import (
 	"github.com/johnfercher/maroto/v2/pkg/consts/align"
 	"github.com/johnfercher/maroto/v2/pkg/consts/fontstyle"
 	"github.com/johnfercher/maroto/v2/pkg/props"
+	"github.com/proxyops/internal/engine"
 )
 
 func handleReportDownload(w http.ResponseWriter, r *http.Request, id int, format string) {
@@ -29,7 +30,7 @@ func handleReportDownload(w http.ResponseWriter, r *http.Request, id int, format
 }
 
 func exportCSV(w http.ResponseWriter, assessmentID int) {
-	report, err := GetReport(appStore, assessmentID)
+	report, err := engine.GetReport(appStore, assessmentID)
 	if err != nil {
 		log.Printf("csv export: %v", err)
 		http.Error(w, err.Error(), http.StatusNotFound)
@@ -96,7 +97,7 @@ func exportCSV(w http.ResponseWriter, assessmentID int) {
 }
 
 func exportPDF(w http.ResponseWriter, assessmentID int) {
-	report, err := GetReport(appStore, assessmentID)
+	report, err := engine.GetReport(appStore, assessmentID)
 	if err != nil {
 		log.Printf("pdf export: %v", err)
 		http.Error(w, err.Error(), http.StatusNotFound)
@@ -108,7 +109,7 @@ func exportPDF(w http.ResponseWriter, assessmentID int) {
 	generatePDF(w, report)
 }
 
-func generatePDF(w http.ResponseWriter, report *AssessmentReport) {
+func generatePDF(w http.ResponseWriter, report *engine.AssessmentReport) {
 	m := maroto.New()
 
 	m.AddRow(20).Add(text.NewCol(12, "TokenSentinel Prescriptive Assessment Report", props.Text{

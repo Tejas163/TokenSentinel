@@ -7,8 +7,11 @@ require (
 	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/jackc/pgx/v5 v5.7.4
 	github.com/johnfercher/maroto/v2 v2.4.0
+	github.com/proxyops/internal/engine v0.0.0
 	github.com/redis/go-redis/v9 v9.20.0
 )
+
+replace github.com/proxyops/internal/engine => ../internal/engine
 
 require (
 	github.com/boombuler/barcode v1.1.0 // indirect

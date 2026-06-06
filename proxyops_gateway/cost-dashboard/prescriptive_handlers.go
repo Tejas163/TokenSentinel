@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/proxyops/internal/engine"
 )
 
 func handlePrescriptiveRouter(w http.ResponseWriter, r *http.Request) {
@@ -63,6 +65,21 @@ func handlePrescriptiveRouter(w http.ResponseWriter, r *http.Request) {
 		handleWhatIf(w, r)
 	case "templates":
 		handleTemplates(w, r)
+	case "marketplace":
+		handleMarketplace(w, r)
+	case "routing-rules":
+		handleRoutingRules(w, r)
+	case "variance":
+		if len(parts) >= 2 {
+			id, err := strconv.Atoi(parts[1])
+			if err != nil {
+				http.Error(w, "invalid id", http.StatusBadRequest)
+				return
+			}
+			handleVariance(w, r, id)
+		} else {
+			http.Error(w, "assessment id required", http.StatusBadRequest)
+		}
 	case "import":
 		if len(parts) >= 2 && parts[1] == "csv" {
 			handleImportCSV(w, r)
@@ -138,6 +155,14 @@ func handleAssessmentVersions(w http.ResponseWriter, r *http.Request) {
 	listAssessmentVersions(w, r, assessmentID)
 }
 
+type AssessmentVersion struct {
+	ID            int             `json:"id"`
+	AssessmentID  int             `json:"assessment_id"`
+	VersionNumber int             `json:"version_number"`
+	Snapshot      json.RawMessage `json:"snapshot"`
+	CreatedAt     string          `json:"created_at"`
+}
+
 func listAssessments(w http.ResponseWriter, r *http.Request) {
 	limit := parseIntParam(r, "limit", 100)
 	offset := parseIntParam(r, "offset", 0)
@@ -161,9 +186,9 @@ func listAssessments(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var assessments []Assessment
+	var assessments []engine.Assessment
 	for rows.Next() {
-		var a Assessment
+		var a engine.Assessment
 		var gpuJSON, tokenJSON, providerJSON, teamJSON []byte
 		var createdAt, updatedAt time.Time
 		if err := rows.Scan(&a.ID, &a.OrgID, &a.CompanyName, &a.CloudVendor, &gpuJSON, &a.MonthlyRequestVolume,
@@ -185,7 +210,7 @@ func listAssessments(w http.ResponseWriter, r *http.Request) {
 }
 
 func createAssessment(w http.ResponseWriter, r *http.Request) {
-	var a Assessment
+	var a engine.Assessment
 	if err := json.NewDecoder(r.Body).Decode(&a); err != nil {
 		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
@@ -206,7 +231,7 @@ func createAssessment(w http.ResponseWriter, r *http.Request) {
 		a.Source = "manual"
 	}
 	if a.TokenDistribution.InputPct == 0 && a.TokenDistribution.OutputPct == 0 {
-		a.TokenDistribution = TokenDistribution{InputPct: 0.7, OutputPct: 0.3}
+		a.TokenDistribution = engine.TokenDistribution{InputPct: 0.7, OutputPct: 0.3}
 	}
 	a.OrgID = getOrgID(r)
 
@@ -243,7 +268,7 @@ func createAssessment(w http.ResponseWriter, r *http.Request) {
 }
 
 func getAssessment(w http.ResponseWriter, r *http.Request, id int) {
-	var a Assessment
+	var a engine.Assessment
 	var gpuJSON, tokenJSON, providerJSON, teamJSON []byte
 	var createdAt, updatedAt time.Time
 
@@ -274,7 +299,10 @@ func getAssessment(w http.ResponseWriter, r *http.Request, id int) {
 }
 
 func updateAssessment(w http.ResponseWriter, r *http.Request, id int) {
-	var existing Assessment
+	var existing struct {
+		ID      int
+		Version int
+	}
 	err := db.QueryRow(`SELECT id, version FROM assessments WHERE id = $1`, id).Scan(&existing.ID, &existing.Version)
 	if err == sql.ErrNoRows {
 		http.Error(w, "not found", http.StatusNotFound)
@@ -286,7 +314,7 @@ func updateAssessment(w http.ResponseWriter, r *http.Request, id int) {
 		return
 	}
 
-	var a Assessment
+	var a engine.Assessment
 	if err := json.NewDecoder(r.Body).Decode(&a); err != nil {
 		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
@@ -411,7 +439,7 @@ func handleRunAssessment(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	report, err := RunAssessment(appStore, id)
+	report, err := engine.RunAssessment(appStore, id)
 	if err != nil {
 		log.Printf("run assessment error: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -421,7 +449,6 @@ func handleRunAssessment(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(report)
 }
-
 
 func handleWhatIf(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
@@ -443,7 +470,7 @@ func handleWhatIf(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
-	projections, err := RunWhatIf(appStore, id, adjustments)
+	projections, err := engine.RunWhatIf(appStore, id, adjustments)
 	if err != nil {
 		log.Printf("what-if error: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -454,9 +481,9 @@ func handleWhatIf(w http.ResponseWriter, r *http.Request) {
 }
 
 type StarterTemplate struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Assessment  Assessment `json:"assessment"`
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	Assessment  engine.Assessment `json:"assessment"`
 }
 
 func handleTemplates(w http.ResponseWriter, r *http.Request) {
@@ -464,54 +491,54 @@ func handleTemplates(w http.ResponseWriter, r *http.Request) {
 		{
 			Name:        "Startup",
 			Description: "5 developers, OpenAI only, ~100K requests/mo",
-			Assessment: Assessment{
+			Assessment: engine.Assessment{
 				CompanyName:          "My Startup",
 				CloudVendor:          "openai",
 				MonthlyRequestVolume: 100000,
-				TokenDistribution:    TokenDistribution{InputPct: 0.7, OutputPct: 0.3},
+				TokenDistribution:    engine.TokenDistribution{InputPct: 0.7, OutputPct: 0.3},
 				CurrentMonthlySpend:  1500,
-				ProvidersUsed:        []ProviderUsage{{Name: "openai", Models: []string{"gpt-4o-mini", "gpt-4o"}, MonthlySpend: 1500}},
-				TeamComposition:      TeamComposition{Developers: 5, PlatformEngineers: 0, DevOps: 0, Management: 1},
+				ProvidersUsed:        []engine.ProviderUsage{{Name: "openai", Models: []string{"gpt-4o-mini", "gpt-4o"}, MonthlySpend: 1500}},
+				TeamComposition:      engine.TeamComposition{Developers: 5, PlatformEngineers: 0, DevOps: 0, Management: 1},
 				Source:               "manual",
 			},
 		},
 		{
 			Name:        "Mid-size",
 			Description: "20 developers, multi-model (OpenAI + Anthropic), ~1M requests/mo",
-			Assessment: Assessment{
+			Assessment: engine.Assessment{
 				CompanyName:          "Mid-size Corp",
 				CloudVendor:          "aws",
 				MonthlyRequestVolume: 1000000,
-				TokenDistribution:    TokenDistribution{InputPct: 0.75, OutputPct: 0.25},
+				TokenDistribution:    engine.TokenDistribution{InputPct: 0.75, OutputPct: 0.25},
 				CurrentMonthlySpend:  12000,
-				GPUConfigs:           []GPUConfig{{Type: "A100", Count: 4, Region: "us-east-1", HourlyPrice: 3.50, Reserved: true}},
-				ProvidersUsed: []ProviderUsage{
+				GPUConfigs:           []engine.GPUConfig{{Type: "A100", Count: 4, Region: "us-east-1", HourlyPrice: 3.50, Reserved: true}},
+				ProvidersUsed: []engine.ProviderUsage{
 					{Name: "openai", Models: []string{"gpt-4o", "gpt-4o-mini"}, MonthlySpend: 7000},
 					{Name: "anthropic", Models: []string{"claude-3-sonnet"}, MonthlySpend: 5000},
 				},
-				TeamComposition: TeamComposition{Developers: 20, PlatformEngineers: 2, DevOps: 1, Management: 2},
+				TeamComposition: engine.TeamComposition{Developers: 20, PlatformEngineers: 2, DevOps: 1, Management: 2},
 				Source:          "manual",
 			},
 		},
 		{
 			Name:        "Enterprise",
 			Description: "50+ developers, self-hosted infra, multi-provider, ~10M requests/mo",
-			Assessment: Assessment{
+			Assessment: engine.Assessment{
 				CompanyName:          "Enterprise Inc",
 				CloudVendor:          "aws",
 				MonthlyRequestVolume: 10000000,
-				TokenDistribution:    TokenDistribution{InputPct: 0.8, OutputPct: 0.2},
+				TokenDistribution:    engine.TokenDistribution{InputPct: 0.8, OutputPct: 0.2},
 				CurrentMonthlySpend:  85000,
-				GPUConfigs: []GPUConfig{
+				GPUConfigs: []engine.GPUConfig{
 					{Type: "H100", Count: 8, Region: "us-east-1", HourlyPrice: 4.50, Reserved: true},
 					{Type: "A100", Count: 4, Region: "us-west-2", HourlyPrice: 3.50, Reserved: false},
 				},
-				ProvidersUsed: []ProviderUsage{
+				ProvidersUsed: []engine.ProviderUsage{
 					{Name: "openai", Models: []string{"gpt-4o", "gpt-4o-mini", "gpt-4-turbo"}, MonthlySpend: 35000},
 					{Name: "anthropic", Models: []string{"claude-3-opus", "claude-3-sonnet"}, MonthlySpend: 25000},
 					{Name: "self-hosted", Models: []string{"llama-3-70b", "llama-3-8b"}, MonthlySpend: 25000},
 				},
-				TeamComposition: TeamComposition{Developers: 50, PlatformEngineers: 5, DevOps: 3, Management: 4},
+				TeamComposition: engine.TeamComposition{Developers: 50, PlatformEngineers: 5, DevOps: 3, Management: 4},
 				Source:          "manual",
 			},
 		},
@@ -519,4 +546,194 @@ func handleTemplates(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(templates)
+}
+
+type MarketplaceTemplate struct {
+	ID            int               `json:"id"`
+	OrgID         string            `json:"-"`
+	Name          string            `json:"name"`
+	Description   string            `json:"description"`
+	Category      string            `json:"category"`
+	TemplateData  engine.Assessment  `json:"template_data"`
+	Tags          []string          `json:"tags"`
+	DownloadCount int               `json:"download_count"`
+	CreatedAt     string            `json:"created_at"`
+	UpdatedAt     string            `json:"updated_at"`
+}
+
+func handleMarketplace(w http.ResponseWriter, r *http.Request) {
+	orgID := getOrgID(r)
+	switch r.Method {
+	case "GET":
+		listMarketplaceTemplates(w, r, orgID)
+	case "POST":
+		createMarketplaceTemplate(w, r, orgID)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func listMarketplaceTemplates(w http.ResponseWriter, r *http.Request, orgID string) {
+	category := r.URL.Query().Get("category")
+	limit := parseIntParam(r, "limit", 50)
+	offset := parseIntParam(r, "offset", 0)
+
+	var rows *sql.Rows
+	var err error
+	query := `SELECT id, name, description, category, template_data, tags, download_count, created_at, updated_at
+		FROM marketplace_templates`
+	var args []interface{}
+	argIdx := 1
+
+	var conditions []string
+	if orgID != "" {
+		conditions = append(conditions, fmt.Sprintf("org_id = $%d", argIdx))
+		args = append(args, orgID)
+		argIdx++
+	}
+	if category != "" {
+		conditions = append(conditions, fmt.Sprintf("category = $%d", argIdx))
+		args = append(args, category)
+		argIdx++
+	}
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	query += fmt.Sprintf(" ORDER BY download_count DESC, created_at DESC LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
+	args = append(args, limit, offset)
+
+	rows, err = db.Query(query, args...)
+	if err != nil {
+		log.Printf("list marketplace error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var templates []MarketplaceTemplate
+	for rows.Next() {
+		var t MarketplaceTemplate
+		var dataJSON []byte
+		var tags []string
+		var createdAt, updatedAt time.Time
+		if err := rows.Scan(&t.ID, &t.Name, &t.Description, &t.Category, &dataJSON, &tags, &t.DownloadCount, &createdAt, &updatedAt); err != nil {
+			log.Printf("scan marketplace template: %v", err)
+			continue
+		}
+		json.Unmarshal(dataJSON, &t.TemplateData)
+		t.Tags = tags
+		t.CreatedAt = createdAt.Format(time.RFC3339)
+		t.UpdatedAt = updatedAt.Format(time.RFC3339)
+		templates = append(templates, t)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(templates)
+}
+
+func createMarketplaceTemplate(w http.ResponseWriter, r *http.Request, orgID string) {
+	var t MarketplaceTemplate
+	if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if t.Name == "" {
+		http.Error(w, "name required", http.StatusBadRequest)
+		return
+	}
+	if t.Category == "" {
+		t.Category = "general"
+	}
+	if t.Tags == nil {
+		t.Tags = []string{}
+	}
+
+	dataJSON, _ := json.Marshal(t.TemplateData)
+	tagsArray := "{}"
+	if len(t.Tags) > 0 {
+		tagList := ""
+		for i, tag := range t.Tags {
+			if i > 0 {
+				tagList += ","
+			}
+			tagList += fmt.Sprintf("%q", tag)
+		}
+		tagsArray = "{" + tagList + "}"
+	}
+
+	var id int
+	var createdAt, updatedAt time.Time
+	err := db.QueryRow(
+		`INSERT INTO marketplace_templates (org_id, name, description, category, template_data, tags)
+		 VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, created_at, updated_at`,
+		orgID, t.Name, t.Description, t.Category, dataJSON, tagsArray,
+	).Scan(&id, &createdAt, &updatedAt)
+	if err != nil {
+		log.Printf("create marketplace template error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	t.ID = id
+	t.CreatedAt = createdAt.Format(time.RFC3339)
+	t.UpdatedAt = updatedAt.Format(time.RFC3339)
+
+	log.Printf("audit: marketplace template created id=%d name=%s from %s", id, t.Name, r.RemoteAddr)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(t)
+}
+
+// Handle per-template operations: GET /api/prescriptive/marketplace/{id}, PUT, DELETE
+// Note: these are routed via the path already consumed by handleMarketplace being called from handlePrescriptiveRouter.
+// The router matches "marketplace" and calls handleMarketplace. For sub-routes like /marketplace/{id},
+// we need to parse the path here. This is a known limitation of the flat router.
+// For now, full CRUD is available via POST (create) and GET (list). Individual operations
+// can be added by extending the router path matching.
+
+func handleRoutingRules(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Models []string `json:"models"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if len(req.Models) == 0 {
+		http.Error(w, "models array required", http.StatusBadRequest)
+		return
+	}
+	rules := engine.GetRoutingRules(req.Models)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(rules)
+}
+
+func handleVariance(w http.ResponseWriter, r *http.Request, id int) {
+	if r.Method != "POST" {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		ActualCosts map[string]float64 `json:"actual_costs"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if len(req.ActualCosts) == 0 {
+		http.Error(w, "actual_costs map required", http.StatusBadRequest)
+		return
+	}
+	entries, err := engine.CompareProjections(appStore, id, req.ActualCosts)
+	if err != nil {
+		log.Printf("variance error: %v", err)
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(entries)
 }

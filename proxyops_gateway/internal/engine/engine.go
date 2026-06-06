@@ -1,81 +1,20 @@
-package main
+package engine
 
 import (
 	"fmt"
 	"math"
-	"strings"
 	"time"
 )
 
-type GPUReference struct {
-	Type         string  `json:"type"`
-	Description  string  `json:"description"`
-	HourlyPrice  float64 `json:"hourly_price"`
-	MonthlyPrice float64 `json:"monthly_price"`
-	Tier         string  `json:"tier"` // datacenter, prosumer
+type AssessmentLiveData struct {
+	TotalMonthlyCost float64
+	Models           map[string]*ModelUsage
 }
 
-var gpuReferencePricing = []GPUReference{
-	{Type: "A100", Description: "NVIDIA A100 80GB PCIe", HourlyPrice: 3.50, MonthlyPrice: 2520, Tier: "datacenter"},
-	{Type: "H100", Description: "NVIDIA H100 80GB SXM", HourlyPrice: 4.50, MonthlyPrice: 3240, Tier: "datacenter"},
-	{Type: "H200", Description: "NVIDIA H200 141GB SXM", HourlyPrice: 5.00, MonthlyPrice: 3600, Tier: "datacenter"},
-	{Type: "B100", Description: "NVIDIA B100 192GB", HourlyPrice: 6.00, MonthlyPrice: 4320, Tier: "datacenter"},
-	{Type: "L40S", Description: "NVIDIA L40S 48GB", HourlyPrice: 2.50, MonthlyPrice: 1800, Tier: "datacenter"},
-	{Type: "RTX4090", Description: "NVIDIA RTX 4090 24GB", HourlyPrice: 0.50, MonthlyPrice: 360, Tier: "prosumer"},
-	{Type: "RTX5090", Description: "NVIDIA RTX 5090 32GB", HourlyPrice: 0.75, MonthlyPrice: 540, Tier: "prosumer"},
-}
-
-type ModelTier int
-
-const (
-	TierFrontier ModelTier = iota + 1
-	TierCapable
-	TierFast
-	TierCheap
-)
-
-type ModelInfo struct {
-	Name         string
-	Provider     string
-	Tier         ModelTier
-	InputPrice   float64
-	OutputPrice  float64
-}
-
-var modelCatalog = []ModelInfo{
-	{Name: "gpt-4", Provider: "openai", Tier: TierFrontier, InputPrice: 30.00, OutputPrice: 60.00},
-	{Name: "gpt-4-turbo", Provider: "openai", Tier: TierFrontier, InputPrice: 10.00, OutputPrice: 30.00},
-	{Name: "gpt-4o", Provider: "openai", Tier: TierCapable, InputPrice: 2.50, OutputPrice: 10.00},
-	{Name: "gpt-4o-mini", Provider: "openai", Tier: TierFast, InputPrice: 0.15, OutputPrice: 0.60},
-	{Name: "gpt-3.5-turbo", Provider: "openai", Tier: TierCheap, InputPrice: 0.50, OutputPrice: 1.50},
-	{Name: "claude-3-opus", Provider: "anthropic", Tier: TierFrontier, InputPrice: 15.00, OutputPrice: 75.00},
-	{Name: "claude-3-sonnet", Provider: "anthropic", Tier: TierCapable, InputPrice: 3.00, OutputPrice: 15.00},
-	{Name: "claude-3-haiku", Provider: "anthropic", Tier: TierFast, InputPrice: 0.25, OutputPrice: 1.25},
-	{Name: "gemini-1.5-pro", Provider: "google", Tier: TierFrontier, InputPrice: 1.25, OutputPrice: 5.00},
-	{Name: "gemini-1.5-flash", Provider: "google", Tier: TierCapable, InputPrice: 0.075, OutputPrice: 0.30},
-	{Name: "mistral-large", Provider: "mistral", Tier: TierFrontier, InputPrice: 2.00, OutputPrice: 6.00},
-	{Name: "mistral-small", Provider: "mistral", Tier: TierFast, InputPrice: 0.60, OutputPrice: 1.80},
-	{Name: "llama-3-70b", Provider: "self-hosted", Tier: TierCapable, InputPrice: 0.59, OutputPrice: 0.79},
-	{Name: "llama-3-8b", Provider: "self-hosted", Tier: TierCheap, InputPrice: 0.05, OutputPrice: 0.20},
-	{Name: "mixtral-8x7b", Provider: "self-hosted", Tier: TierCapable, InputPrice: 0.24, OutputPrice: 0.72},
-}
-
-// Equivalence groups map each model to alternatives in the same tier
-var modelEquivalence = map[string][]string{
-	"gpt-4":         {"claude-3-opus", "gemini-1.5-pro", "mistral-large"},
-	"gpt-4-turbo":   {"claude-3-opus", "gemini-1.5-pro"},
-	"gpt-4o":        {"claude-3-sonnet", "gemini-1.5-flash", "llama-3-70b", "mixtral-8x7b"},
-	"gpt-4o-mini":   {"claude-3-haiku", "mistral-small"},
-	"gpt-3.5-turbo": {"llama-3-8b", "claude-3-haiku"},
-	"claude-3-opus": {"gpt-4", "gemini-1.5-pro", "mistral-large"},
-	"claude-3-sonnet": {"gpt-4o", "gemini-1.5-flash", "mixtral-8x7b"},
-	"claude-3-haiku": {"gpt-4o-mini", "mistral-small"},
-	"gemini-1.5-pro": {"gpt-4", "claude-3-opus", "mistral-large"},
-	"gemini-1.5-flash": {"gpt-4o", "claude-3-sonnet"},
-	"mistral-large": {"gpt-4", "claude-3-opus", "gemini-1.5-pro"},
-	"mistral-small": {"gpt-4o-mini", "claude-3-haiku"},
-	"llama-3-70b": {"gpt-4o", "mixtral-8x7b"},
-	"llama-3-8b": {"gpt-3.5-turbo"},
+type ModelUsage struct {
+	InputTokens  int64
+	OutputTokens int64
+	RequestCount int64
 }
 
 func RunAssessment(store Store, assessmentID int) (*AssessmentReport, error) {
@@ -120,17 +59,6 @@ func RunAssessment(store Store, assessmentID int) (*AssessmentReport, error) {
 	}, nil
 }
 
-type AssessmentLiveData struct {
-	TotalMonthlyCost float64
-	Models           map[string]*ModelUsage
-}
-
-type ModelUsage struct {
-	InputTokens  int64
-	OutputTokens int64
-	RequestCount int64
-}
-
 func calculateCostBreakdown(a *Assessment, liveData *AssessmentLiveData) []CostProjection {
 	liveModels := make(map[string]bool)
 	var projections []CostProjection
@@ -138,7 +66,7 @@ func calculateCostBreakdown(a *Assessment, liveData *AssessmentLiveData) []CostP
 	if liveData != nil && len(liveData.Models) > 0 {
 		for model, usage := range liveData.Models {
 			liveModels[model] = true
-			mi := findModel(model)
+			mi := FindModel(model)
 			provider := "unknown"
 			inputPrice := 30.00
 			outputPrice := 60.00
@@ -168,7 +96,7 @@ func calculateCostBreakdown(a *Assessment, liveData *AssessmentLiveData) []CostP
 				if liveModels[model] {
 					continue
 				}
-				mi := findModel(model)
+				mi := FindModel(model)
 				provider := pu.Name
 				inputPrice := 30.00
 				outputPrice := 60.00
@@ -226,7 +154,7 @@ func generateRecommendations(a *Assessment, costBreakdown []CostProjection) []Re
 }
 
 func recommendModelSubstitution(cp *CostProjection) []Recommendation {
-	mi := findModel(cp.Model)
+	mi := FindModel(cp.Model)
 	if mi == nil || mi.Tier == TierCheap {
 		return nil
 	}
@@ -234,9 +162,9 @@ func recommendModelSubstitution(cp *CostProjection) []Recommendation {
 	var best *ModelInfo
 	var bestSavings float64
 
-	equivalents := modelEquivalence[mi.Name]
+	equivalents := ModelEquivalence[mi.Name]
 	for _, eqName := range equivalents {
-		eq := findModel(eqName)
+		eq := FindModel(eqName)
 		if eq == nil {
 			continue
 		}
@@ -297,7 +225,7 @@ func recommendInfraDownsize(a *Assessment) []Recommendation {
 				ratio := float64(gpu.Count) / float64(totalGPUs)
 				savingsPerGPU += cost * ratio
 			} else {
-				ref := findGPUReference(gpu.Type)
+				ref := FindGPUReference(gpu.Type)
 				if ref != nil {
 					cost := ref.HourlyPrice * float64(gpu.Count) * 730
 					ratio := float64(gpu.Count) / float64(totalGPUs)
@@ -321,15 +249,6 @@ func recommendInfraDownsize(a *Assessment) []Recommendation {
 	return recs
 }
 
-func findGPUReference(gpuType string) *GPUReference {
-	for _, g := range gpuReferencePricing {
-		if strings.EqualFold(g.Type, gpuType) {
-			return &g
-		}
-	}
-	return nil
-}
-
 func recommendProviderSwitch(costBreakdown []CostProjection) []Recommendation {
 	var recs []Recommendation
 	providerCosts := make(map[string]float64)
@@ -344,11 +263,7 @@ func recommendProviderSwitch(costBreakdown []CostProjection) []Recommendation {
 		if cost < 500 {
 			continue
 		}
-		mi := findModel(costBreakdown[0].Model)
-		if mi == nil {
-			continue
-		}
-		selfHostedAlt := findModel("llama-3-70b")
+		selfHostedAlt := FindModel("llama-3-70b")
 		if selfHostedAlt == nil {
 			continue
 		}
@@ -431,6 +346,165 @@ func GetReport(store Store, assessmentID int) (*AssessmentReport, error) {
 		TotalProjected:  totalProjected,
 		TotalSavings:    totalSavings,
 	}, nil
+}
+
+type RoutingRule struct {
+	Model           string   `json:"model"`
+	SuggestedTarget string   `json:"suggested_target"`
+	Reason          string   `json:"reason"`
+	CurrentPrice    float64  `json:"current_price_per_mtok"`
+	TargetPrice     float64  `json:"target_price_per_mtok"`
+	SavingsPercent  float64  `json:"savings_percent"`
+	Confidence      string   `json:"confidence"`
+	Tags            []string `json:"tags,omitempty"`
+}
+
+func GetRoutingRules(models []string) []RoutingRule {
+	type candidate struct {
+		model   *ModelInfo
+		target  *ModelInfo
+		savings float64
+	}
+	var rules []RoutingRule
+	for _, name := range models {
+		mi := FindModel(name)
+		if mi == nil || mi.Tier == TierCheap {
+			continue
+		}
+		var best candidate
+		for _, eqName := range ModelEquivalence[name] {
+			eq := FindModel(eqName)
+			if eq == nil || eq.Tier >= mi.Tier {
+				continue
+			}
+			currentAvg := (mi.InputPrice + mi.OutputPrice) / 2
+			targetAvg := (eq.InputPrice + eq.OutputPrice) / 2
+			savings := 1 - targetAvg/currentAvg
+			if savings > best.savings {
+				best = candidate{model: mi, target: eq, savings: savings}
+			}
+		}
+		if best.target == nil || best.savings < 0.05 {
+			continue
+		}
+		tags := []string{"cost_optimization"}
+		if best.savings > 0.5 {
+			tags = append(tags, "high_impact")
+		}
+		if mi.Provider != best.target.Provider {
+			tags = append(tags, "provider_switch")
+		}
+		confidence := "medium"
+		if best.savings > 0.4 {
+			confidence = "high"
+		} else if best.savings < 0.1 {
+			confidence = "low"
+		}
+		rules = append(rules, RoutingRule{
+			Model:           mi.Name,
+			SuggestedTarget: best.target.Name,
+			Reason:          fmt.Sprintf("Switch %s ($%.2f/Mtok) to %s ($%.2f/Mtok) — save %.0f%%", mi.Name, currentAvgPrice(mi), best.target.Name, currentAvgPrice(best.target), best.savings*100),
+			CurrentPrice:    currentAvgPrice(mi),
+			TargetPrice:     currentAvgPrice(best.target),
+			SavingsPercent:  best.savings * 100,
+			Confidence:      confidence,
+			Tags:            tags,
+		})
+	}
+	return rules
+}
+
+type BudgetRoutingSuggestion struct {
+	Model            string  `json:"model"`
+	CurrentProvider  string  `json:"current_provider"`
+	SuggestedModel   string  `json:"suggested_model"`
+	SuggestedProvider string `json:"suggested_provider"`
+	EstimatedSavings float64 `json:"estimated_savings_per_mtok"`
+	TierDrop         bool    `json:"tier_drop"`
+}
+
+func GetBudgetRoutingSuggestions(usageByModel map[string]float64) []BudgetRoutingSuggestion {
+	var suggestions []BudgetRoutingSuggestion
+	for model := range usageByModel {
+		mi := FindModel(model)
+		if mi == nil || mi.Tier == TierCheap {
+			continue
+		}
+		var best *ModelInfo
+		var bestSavings float64
+		for _, eqName := range ModelEquivalence[model] {
+			eq := FindModel(eqName)
+			if eq == nil || eq.Tier >= mi.Tier {
+				continue
+			}
+			currentAvg := (mi.InputPrice + mi.OutputPrice) / 2
+			targetAvg := (eq.InputPrice + eq.OutputPrice) / 2
+			savings := (currentAvg - targetAvg) / currentAvg
+			if savings > bestSavings {
+				bestSavings = savings
+				best = eq
+			}
+		}
+		if best == nil || bestSavings < 0.05 {
+			continue
+		}
+		suggestions = append(suggestions, BudgetRoutingSuggestion{
+			Model:             model,
+			CurrentProvider:   mi.Provider,
+			SuggestedModel:    best.Name,
+			SuggestedProvider: best.Provider,
+			EstimatedSavings:  bestSavings,
+			TierDrop:          best.Tier < mi.Tier,
+		})
+	}
+	return suggestions
+}
+
+type VarianceEntry struct {
+	Model              string  `json:"model"`
+	ProjectedCost      float64 `json:"projected_cost"`
+	ActualCost         float64 `json:"actual_cost"`
+	Variance           float64 `json:"variance"`
+	VariancePercent    float64 `json:"variance_percent"`
+	Direction          string  `json:"direction"` // under, over, on_track
+}
+
+func CompareProjections(store Store, assessmentID int, actualCosts map[string]float64) ([]VarianceEntry, error) {
+	projections, err := store.GetCostProjections(assessmentID, "base")
+	if err != nil {
+		return nil, err
+	}
+	if len(projections) == 0 {
+		return nil, fmt.Errorf("no projections found for assessment %d", assessmentID)
+	}
+	var entries []VarianceEntry
+	for _, cp := range projections {
+		actual := actualCosts[cp.Model]
+		variance := actual - cp.ProjectedMonthlyCost
+		variancePct := 0.0
+		if cp.ProjectedMonthlyCost > 0 {
+			variancePct = (variance / cp.ProjectedMonthlyCost) * 100
+		}
+		direction := "on_track"
+		if variance > cp.ProjectedMonthlyCost*0.1 {
+			direction = "over"
+		} else if variance < -cp.ProjectedMonthlyCost*0.1 {
+			direction = "under"
+		}
+		entries = append(entries, VarianceEntry{
+			Model:           cp.Model,
+			ProjectedCost:   cp.ProjectedMonthlyCost,
+			ActualCost:      actual,
+			Variance:        variance,
+			VariancePercent: variancePct,
+			Direction:       direction,
+		})
+	}
+	return entries, nil
+}
+
+func currentAvgPrice(mi *ModelInfo) float64 {
+	return (mi.InputPrice + mi.OutputPrice) / 2
 }
 
 func RunWhatIf(store Store, assessmentID int, adjustments map[string]float64) ([]CostProjection, error) {

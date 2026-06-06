@@ -7,6 +7,8 @@ import (
 	"log"
 	"net/http"
 	"strings"
+
+	"github.com/proxyops/internal/engine"
 )
 
 //go:embed report.html
@@ -19,7 +21,7 @@ func init() {
 }
 
 func handleReport(w http.ResponseWriter, r *http.Request, id int) {
-	report, err := GetReport(appStore, id)
+	report, err := engine.GetReport(appStore, id)
 	if err != nil {
 		log.Printf("get report error: %v", err)
 		http.Error(w, err.Error(), http.StatusNotFound)

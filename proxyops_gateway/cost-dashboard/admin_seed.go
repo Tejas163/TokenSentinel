@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/proxyops/internal/engine"
 )
 
 const demoAssessmentName = "DemoCorp"
@@ -69,7 +71,7 @@ func handleAdminSeed(w http.ResponseWriter, r *http.Request) {
 			"source": "manual"
 		}`
 
-		var a Assessment
+		var a engine.Assessment
 		if err := json.Unmarshal([]byte(assessmentJSON), &a); err != nil {
 			http.Error(w, fmt.Sprintf("parse assessment: %v", err), http.StatusInternalServerError)
 			return
@@ -92,7 +94,7 @@ func handleAdminSeed(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Run prescriptive engine (re-runs if already exists, clearing stale data)
-	report, err := RunAssessment(appStore, aid)
+	report, err := engine.RunAssessment(appStore, aid)
 	if err != nil {
 		log.Printf("seed: run assessment error: %v", err)
 	} else {

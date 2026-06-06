@@ -1,121 +1,8 @@
-package main
+package engine
 
 import (
-	"fmt"
-	"sync"
 	"testing"
-	"time"
 )
-
-type memStore struct {
-	mu             sync.Mutex
-	assessments    map[int]*Assessment
-	costProjections map[int][]CostProjection
-	recommendations map[int][]Recommendation
-	liveData       *AssessmentLiveData
-	nextAssessmentID int
-}
-
-func newMemStore() *memStore {
-	return &memStore{
-		assessments:    make(map[int]*Assessment),
-		costProjections: make(map[int][]CostProjection),
-		recommendations: make(map[int][]Recommendation),
-		nextAssessmentID: 1,
-	}
-}
-
-func (s *memStore) addAssessment(a *Assessment) int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	id := s.nextAssessmentID
-	s.nextAssessmentID++
-	a.ID = id
-	s.assessments[id] = a
-	return id
-}
-
-func (s *memStore) GetAssessment(id int) (*Assessment, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	a, ok := s.assessments[id]
-	if !ok {
-		return nil, fmt.Errorf("assessment %d not found", id)
-	}
-	cp := *a
-	return &cp, nil
-}
-
-func (s *memStore) QueryLiveCostData(since time.Time) (*AssessmentLiveData, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.liveData == nil {
-		return &AssessmentLiveData{Models: make(map[string]*ModelUsage)}, nil
-	}
-	cp := *s.liveData
-	cp.Models = make(map[string]*ModelUsage)
-	for k, v := range s.liveData.Models {
-		uv := *v
-		cp.Models[k] = &uv
-	}
-	return &cp, nil
-}
-
-func (s *memStore) ReplaceCostProjections(assessmentID int, projections []CostProjection) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	cp := make([]CostProjection, len(projections))
-	copy(cp, projections)
-	s.costProjections[assessmentID] = cp
-	return nil
-}
-
-func (s *memStore) ReplaceRecommendations(assessmentID int, recs []Recommendation) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	cp := make([]Recommendation, len(recs))
-	copy(cp, recs)
-	s.recommendations[assessmentID] = cp
-	return nil
-}
-
-func (s *memStore) GetCostProjections(assessmentID int, scenario string) ([]CostProjection, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	projs, ok := s.costProjections[assessmentID]
-	if !ok {
-		return nil, nil
-	}
-	cp := make([]CostProjection, len(projs))
-	copy(cp, projs)
-	return cp, nil
-}
-
-func (s *memStore) GetRecommendations(assessmentID int) ([]Recommendation, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	recs, ok := s.recommendations[assessmentID]
-	if !ok {
-		return nil, nil
-	}
-	cp := make([]Recommendation, len(recs))
-	copy(cp, recs)
-	return cp, nil
-}
-
-func (s *memStore) InsertCostProjections(assessmentID int, projections []CostProjection, scenario string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	existing := s.costProjections[assessmentID]
-	for _, p := range projections {
-		cp := p
-		cp.AssessmentID = assessmentID
-		cp.Scenario = scenario
-		existing = append(existing, cp)
-	}
-	s.costProjections[assessmentID] = existing
-	return nil
-}
 
 func makeSimpleAssessment(cfg baseConfig) *Assessment {
 	return &Assessment{
@@ -150,8 +37,8 @@ func fullProviders() []ProviderUsage {
 // --- Tests ---
 
 func TestRunAssessment_EmptyProviders(t *testing.T) {
-	store := newMemStore()
-	aid := store.addAssessment(makeSimpleAssessment(baseConfig{
+	store := NewMemStore()
+	aid := store.AddAssessment(makeSimpleAssessment(baseConfig{
 		volume: 100000, spend: 0, providers: nil, gpus: nil,
 	}))
 
@@ -171,8 +58,8 @@ func TestRunAssessment_EmptyProviders(t *testing.T) {
 }
 
 func TestRunAssessment_AllFrontierTier(t *testing.T) {
-	store := newMemStore()
-	aid := store.addAssessment(makeSimpleAssessment(baseConfig{
+	store := NewMemStore()
+	aid := store.AddAssessment(makeSimpleAssessment(baseConfig{
 		volume: 500000,
 		spend:  15000,
 		providers: []ProviderUsage{
@@ -194,12 +81,6 @@ func TestRunAssessment_AllFrontierTier(t *testing.T) {
 		t.Fatal("expected recommendations for expensive frontier models")
 	}
 
-	// All frontier-tier models have only frontier-tier equivalents,
-	// so no model_switch recs. Check that other rec types are generated instead.
-	if len(report.Recommendations) == 0 {
-		t.Error("expected some recommendations (provider_switch, batch_optimization) for high-spend assessment")
-	}
-
 	saved, err := store.GetRecommendations(aid)
 	if err != nil {
 		t.Fatal(err)
@@ -210,8 +91,8 @@ func TestRunAssessment_AllFrontierTier(t *testing.T) {
 }
 
 func TestRunAssessment_AlreadyOptimized(t *testing.T) {
-	store := newMemStore()
-	aid := store.addAssessment(makeSimpleAssessment(baseConfig{
+	store := NewMemStore()
+	aid := store.AddAssessment(makeSimpleAssessment(baseConfig{
 		volume: 100000,
 		spend:  500,
 		providers: []ProviderUsage{
@@ -237,8 +118,8 @@ func TestRunAssessment_AlreadyOptimized(t *testing.T) {
 }
 
 func TestRunAssessment_WithGPUConfig(t *testing.T) {
-	store := newMemStore()
-	aid := store.addAssessment(makeSimpleAssessment(baseConfig{
+	store := NewMemStore()
+	aid := store.AddAssessment(makeSimpleAssessment(baseConfig{
 		volume: 20000,
 		spend:  5000,
 		providers: []ProviderUsage{
@@ -267,7 +148,7 @@ func TestRunAssessment_WithGPUConfig(t *testing.T) {
 }
 
 func TestRunAssessment_WithLiveData(t *testing.T) {
-	store := newMemStore()
+	store := NewMemStore()
 	a := makeSimpleAssessment(baseConfig{
 		volume: 1000000,
 		spend:  12000,
@@ -275,16 +156,16 @@ func TestRunAssessment_WithLiveData(t *testing.T) {
 		gpus: nil,
 	})
 	a.Source = "live"
-	aid := store.addAssessment(a)
+	aid := store.AddAssessment(a)
 
-	store.liveData = &AssessmentLiveData{
+	store.SetLiveData(&AssessmentLiveData{
 		TotalMonthlyCost: 12000,
 		Models: map[string]*ModelUsage{
 			"gpt-4o":       {InputTokens: 1_000_000, OutputTokens: 200_000, RequestCount: 6000},
 			"gpt-4o-mini":  {InputTokens: 5_000_000, OutputTokens: 1_000_000, RequestCount: 20000},
 			"claude-3-opus": {InputTokens: 200_000, OutputTokens: 50_000, RequestCount: 800},
 		},
-	}
+	})
 
 	report, err := RunAssessment(store, aid)
 	if err != nil {
@@ -309,8 +190,8 @@ func TestRunAssessment_WithLiveData(t *testing.T) {
 }
 
 func TestRunAssessment_NoProvidersNoGPUs(t *testing.T) {
-	store := newMemStore()
-	aid := store.addAssessment(makeSimpleAssessment(baseConfig{
+	store := NewMemStore()
+	aid := store.AddAssessment(makeSimpleAssessment(baseConfig{
 		volume: 0, spend: 0, providers: nil, gpus: nil,
 	}))
 
@@ -324,8 +205,8 @@ func TestRunAssessment_NoProvidersNoGPUs(t *testing.T) {
 }
 
 func TestRunWhatIf_ScaleVolume(t *testing.T) {
-	store := newMemStore()
-	aid := store.addAssessment(makeSimpleAssessment(baseConfig{
+	store := NewMemStore()
+	aid := store.AddAssessment(makeSimpleAssessment(baseConfig{
 		volume: 100000,
 		spend:  5000,
 		providers: []ProviderUsage{
@@ -357,8 +238,8 @@ func TestRunWhatIf_ScaleVolume(t *testing.T) {
 }
 
 func TestRunWhatIf_InputPctAdjustment(t *testing.T) {
-	store := newMemStore()
-	aid := store.addAssessment(makeSimpleAssessment(baseConfig{
+	store := NewMemStore()
+	aid := store.AddAssessment(makeSimpleAssessment(baseConfig{
 		volume: 100000,
 		spend:  5000,
 		providers: []ProviderUsage{
@@ -377,7 +258,7 @@ func TestRunWhatIf_InputPctAdjustment(t *testing.T) {
 }
 
 func TestRunWhatIf_NotFound(t *testing.T) {
-	store := newMemStore()
+	store := NewMemStore()
 	_, err := RunWhatIf(store, 999, map[string]float64{})
 	if err == nil {
 		t.Fatal("expected error for non-existent assessment")
@@ -385,7 +266,7 @@ func TestRunWhatIf_NotFound(t *testing.T) {
 }
 
 func TestRunAssessment_NotFound(t *testing.T) {
-	store := newMemStore()
+	store := NewMemStore()
 	_, err := RunAssessment(store, 999)
 	if err == nil {
 		t.Fatal("expected error for non-existent assessment")
@@ -393,8 +274,8 @@ func TestRunAssessment_NotFound(t *testing.T) {
 }
 
 func TestRunAssessment_IdempotentRerun(t *testing.T) {
-	store := newMemStore()
-	aid := store.addAssessment(makeSimpleAssessment(baseConfig{
+	store := NewMemStore()
+	aid := store.AddAssessment(makeSimpleAssessment(baseConfig{
 		volume: 500000,
 		spend:  15000,
 		providers: fullProviders(),
@@ -438,7 +319,6 @@ func TestCostBreakdown_MergeLiveAndAssessment(t *testing.T) {
 		t.Fatal("expected projections")
 	}
 
-	liveModels := 0
 	assessmentModels := 0
 	for _, p := range projections {
 		if p.Provider == "openai" || p.Provider == "anthropic" || p.Provider == "self-hosted" {
@@ -447,9 +327,6 @@ func TestCostBreakdown_MergeLiveAndAssessment(t *testing.T) {
 	}
 	if assessmentModels == 0 {
 		t.Error("expected assessment-based models in breakdown")
-	}
-	if liveModels == 0 {
-		// just verify we got non-live models (the ones from providers_used that aren't in liveData)
 	}
 
 	allProviders := make(map[string]bool)
@@ -465,8 +342,8 @@ func TestCostBreakdown_MergeLiveAndAssessment(t *testing.T) {
 }
 
 func TestRecommendModelSubstitution_NoCheapSub(t *testing.T) {
-	store := newMemStore()
-	aid := store.addAssessment(makeSimpleAssessment(baseConfig{
+	store := NewMemStore()
+	aid := store.AddAssessment(makeSimpleAssessment(baseConfig{
 		volume: 100000,
 		spend:  100,
 		providers: []ProviderUsage{
@@ -494,8 +371,8 @@ func TestRecommendGPUInfra_NoGPUs(t *testing.T) {
 }
 
 func TestGetReport_Empty(t *testing.T) {
-	store := newMemStore()
-	aid := store.addAssessment(makeSimpleAssessment(baseConfig{
+	store := NewMemStore()
+	aid := store.AddAssessment(makeSimpleAssessment(baseConfig{
 		volume: 100000, spend: 0, providers: nil, gpus: nil,
 	}))
 
@@ -509,7 +386,7 @@ func TestGetReport_Empty(t *testing.T) {
 }
 
 func TestGetReport_NotFound(t *testing.T) {
-	store := newMemStore()
+	store := NewMemStore()
 	_, err := GetReport(store, 999)
 	if err == nil {
 		t.Fatal("expected error for non-existent report")
@@ -553,7 +430,7 @@ func TestRecommendBatchOptimization_LowVolume(t *testing.T) {
 }
 
 func TestFindGPUReference(t *testing.T) {
-	ref := findGPUReference("A100")
+	ref := FindGPUReference("A100")
 	if ref == nil {
 		t.Fatal("expected A100 reference")
 	}
@@ -561,7 +438,7 @@ func TestFindGPUReference(t *testing.T) {
 		t.Errorf("expected $3.50/hr, got $%.2f", ref.HourlyPrice)
 	}
 
-	ref = findGPUReference("nonexistent")
+	ref = FindGPUReference("nonexistent")
 	if ref != nil {
 		t.Error("expected nil for unknown GPU type")
 	}
@@ -576,7 +453,7 @@ func TestGenerateRecommendations_EmptyBreakdown(t *testing.T) {
 }
 
 func TestRunAssessment_LiveDataFallback(t *testing.T) {
-	store := newMemStore()
+	store := NewMemStore()
 	a := makeSimpleAssessment(baseConfig{
 		volume: 500000,
 		spend:  12000,
@@ -584,14 +461,14 @@ func TestRunAssessment_LiveDataFallback(t *testing.T) {
 		gpus: nil,
 	})
 	a.Source = "live"
-	aid := store.addAssessment(a)
+	aid := store.AddAssessment(a)
 
-	store.liveData = &AssessmentLiveData{
+	store.SetLiveData(&AssessmentLiveData{
 		TotalMonthlyCost: 12000,
 		Models: map[string]*ModelUsage{
 			"gpt-4o": {InputTokens: 1_500_000, OutputTokens: 300_000, RequestCount: 10000},
 		},
-	}
+	})
 
 	report, err := RunAssessment(store, aid)
 	if err != nil {
@@ -613,8 +490,8 @@ func TestRunAssessment_LiveDataFallback(t *testing.T) {
 }
 
 func TestRunAssessment_MultipleRunsMergeBreakdown(t *testing.T) {
-	store := newMemStore()
-	aid := store.addAssessment(makeSimpleAssessment(baseConfig{
+	store := NewMemStore()
+	aid := store.AddAssessment(makeSimpleAssessment(baseConfig{
 		volume: 500000,
 		spend:  10000,
 		providers: []ProviderUsage{

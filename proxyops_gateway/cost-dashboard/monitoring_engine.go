@@ -10,6 +10,8 @@ import (
 	"math"
 	"strings"
 	"time"
+
+	"github.com/proxyops/internal/engine"
 )
 
 func monitorSpendTrends(ctx context.Context) {
@@ -85,7 +87,7 @@ func checkSpendTrends() {
 
 func queryModelCosts(since string) map[string]float64 {
 	result := make(map[string]float64)
-	for _, mi := range modelCatalog {
+	for _, mi := range engine.ModelCatalog {
 		inputCost := (queryTokenSum("cost_entries", "input_tokens", mi.Name, since) / 1000) * mi.InputPrice
 		outputCost := (queryTokenSum("cost_entries", "output_tokens", mi.Name, since) / 1000) * mi.OutputPrice
 		total := inputCost + outputCost
@@ -124,7 +126,7 @@ func queryModelCosts(since string) map[string]float64 {
 
 func queryModelCostsRange(since, until string) map[string]float64 {
 	result := make(map[string]float64)
-	for _, mi := range modelCatalog {
+	for _, mi := range engine.ModelCatalog {
 		inputCost := (queryTokenSumRange("cost_entries", "input_tokens", mi.Name, since, until) / 1000) * mi.InputPrice
 		outputCost := (queryTokenSumRange("cost_entries", "output_tokens", mi.Name, since, until) / 1000) * mi.OutputPrice
 		total := inputCost + outputCost
@@ -195,7 +197,7 @@ func createAlert(model, alertType, severity, message string, currentValue, thres
 }
 
 func detectSavings() {
-	for _, mi := range modelCatalog {
+	for _, mi := range engine.ModelCatalog {
 		recentSince := recentTime("7d")
 		priorSince := recentTime("14d")
 		recentEnd := recentSince
@@ -328,7 +330,7 @@ func getTrendData(model, period string) ([]SpendTrendPoint, error) {
 			log.Printf("scan trend data: %v", err)
 			continue
 		}
-		mi := findModel(model)
+		mi := engine.FindModel(model)
 		inputPrice := 30.0
 		outputPrice := 60.0
 		if mi != nil {
