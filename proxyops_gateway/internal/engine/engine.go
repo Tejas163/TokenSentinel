@@ -3,8 +3,34 @@ package engine
 import (
 	"fmt"
 	"math"
+	"sort"
 	"time"
 )
+
+var fallbackInputPrice, fallbackOutputPrice float64
+
+func init() {
+	var in, out []float64
+	for _, m := range ModelCatalog {
+		in = append(in, m.InputPrice)
+		out = append(out, m.OutputPrice)
+	}
+	sort.Float64s(in)
+	sort.Float64s(out)
+	n := len(in)
+	if n == 0 {
+		fallbackInputPrice = 30.00
+		fallbackOutputPrice = 60.00
+		return
+	}
+	if n%2 == 0 {
+		fallbackInputPrice = (in[n/2-1] + in[n/2]) / 2
+		fallbackOutputPrice = (out[n/2-1] + out[n/2]) / 2
+	} else {
+		fallbackInputPrice = in[n/2]
+		fallbackOutputPrice = out[n/2]
+	}
+}
 
 type AssessmentLiveData struct {
 	TotalMonthlyCost float64
@@ -17,11 +43,31 @@ type ModelUsage struct {
 	RequestCount int64
 }
 
+func copyAssessment(a *Assessment) *Assessment {
+	ca := *a
+	if a.GPUConfigs != nil {
+		ca.GPUConfigs = make([]GPUConfig, len(a.GPUConfigs))
+		copy(ca.GPUConfigs, a.GPUConfigs)
+	}
+	if a.ProvidersUsed != nil {
+		ca.ProvidersUsed = make([]ProviderUsage, len(a.ProvidersUsed))
+		for i, pu := range a.ProvidersUsed {
+			ca.ProvidersUsed[i] = pu
+			if pu.Models != nil {
+				ca.ProvidersUsed[i].Models = make([]string, len(pu.Models))
+				copy(ca.ProvidersUsed[i].Models, pu.Models)
+			}
+		}
+	}
+	return &ca
+}
+
 func RunAssessment(store Store, assessmentID int) (*AssessmentReport, error) {
 	a, err := store.GetAssessment(assessmentID)
 	if err != nil {
 		return nil, err
 	}
+	a = copyAssessment(a)
 
 	var liveData *AssessmentLiveData
 	if a.Source == "live" {
@@ -70,14 +116,14 @@ func calculateCostBreakdown(a *Assessment, liveData *AssessmentLiveData) []CostP
 			liveModels[model] = true
 			mi := FindModel(model)
 			provider := "unknown"
-			inputPrice := 30.00
-			outputPrice := 60.00
+			inputPrice := fallbackInputPrice
+			outputPrice := fallbackOutputPrice
 			if mi != nil {
 				provider = mi.Provider
 				inputPrice = mi.InputPrice
 				outputPrice = mi.OutputPrice
 			}
-			currentCost := (float64(usage.InputTokens)/1000)*inputPrice + (float64(usage.OutputTokens)/1000)*outputPrice
+			currentCost := (float64(usage.InputTokens)/1_000_000)*inputPrice + (float64(usage.OutputTokens)/1_000_000)*outputPrice
 			inputM := float64(usage.InputTokens) / 1_000_000
 			outputM := float64(usage.OutputTokens) / 1_000_000
 			projections = append(projections, CostProjection{
@@ -100,17 +146,17 @@ func calculateCostBreakdown(a *Assessment, liveData *AssessmentLiveData) []CostP
 				}
 				mi := FindModel(model)
 				provider := pu.Name
-				inputPrice := 30.00
-				outputPrice := 60.00
+				inputPrice := fallbackInputPrice
+				outputPrice := fallbackOutputPrice
 				if mi != nil {
 					inputPrice = mi.InputPrice
 					outputPrice = mi.OutputPrice
 					provider = mi.Provider
 				}
-				avgPricePerK := (inputPrice + outputPrice) / 2
+				avgPricePerM := (inputPrice + outputPrice) / 2
 				modelFraction := 1.0 / float64(len(pu.Models))
 				modelSpend := pu.MonthlySpend * modelFraction
-				totalTokensK := modelSpend / avgPricePerK * 1000
+				totalTokensK := modelSpend / avgPricePerM * 1000
 				inputPct := 0.7
 				if a.TokenDistribution.InputPct > 0 {
 					inputPct = a.TokenDistribution.InputPct
@@ -161,6 +207,12 @@ func recommendModelSubstitution(cp *CostProjection) []Recommendation {
 		return nil
 	}
 
+	totalM := cp.InputTokensMillions + cp.OutputTokensMillions
+	inputRatio := 0.7
+	if totalM > 0 {
+		inputRatio = cp.InputTokensMillions / totalM
+	}
+
 	var best *ModelInfo
 	var bestSavings float64
 
@@ -173,16 +225,17 @@ func recommendModelSubstitution(cp *CostProjection) []Recommendation {
 		if eq.Tier >= mi.Tier {
 			continue
 		}
-		currentAvgPrice := (mi.InputPrice + mi.OutputPrice) / 2
-		eqAvgPrice := (eq.InputPrice + eq.OutputPrice) / 2
-		savings := cp.CurrentMonthlyCost * (1 - eqAvgPrice/currentAvgPrice)
+		currentWt := mi.InputPrice*inputRatio + mi.OutputPrice*(1-inputRatio)
+		eqWt := eq.InputPrice*inputRatio + eq.OutputPrice*(1-inputRatio)
+		savings := cp.CurrentMonthlyCost * (1 - eqWt/currentWt)
 		if savings > bestSavings {
 			bestSavings = savings
 			best = eq
 		}
 	}
 
-	if best == nil || bestSavings < 10 {
+	hysteresisThreshold := cp.CurrentMonthlyCost * 0.05
+	if best == nil || bestSavings < hysteresisThreshold {
 		return nil
 	}
 
@@ -208,6 +261,9 @@ func recommendInfraDownsize(a *Assessment) []Recommendation {
 	var recs []Recommendation
 	totalGPUs := 0
 	for _, gpu := range a.GPUConfigs {
+		if gpu.Count <= 0 {
+			continue
+		}
 		totalGPUs += gpu.Count
 	}
 	if totalGPUs == 0 {
@@ -222,24 +278,36 @@ func recommendInfraDownsize(a *Assessment) []Recommendation {
 		}
 		savingsPerGPU := 0.0
 		for _, gpu := range a.GPUConfigs {
-			if gpu.HourlyPrice > 0 {
-				cost := gpu.HourlyPrice * float64(gpu.Count) * 730
-				ratio := float64(gpu.Count) / float64(totalGPUs)
-				savingsPerGPU += cost * ratio
-			} else {
+			if gpu.Count <= 0 {
+				continue
+			}
+			hourlyPrice := gpu.HourlyPrice
+			if hourlyPrice <= 0 {
 				ref := FindGPUReference(gpu.Type)
 				if ref != nil {
-					cost := ref.HourlyPrice * float64(gpu.Count) * 730
-					ratio := float64(gpu.Count) / float64(totalGPUs)
-					savingsPerGPU += cost * ratio
+					hourlyPrice = ref.HourlyPrice
 				}
 			}
+			if hourlyPrice <= 0 {
+				continue
+			}
+			effectivePrice := hourlyPrice
+			if gpu.Reserved {
+				effectivePrice = hourlyPrice * 0.7
+			}
+			cost := effectivePrice * float64(gpu.Count) * 730
+			ratio := float64(gpu.Count) / float64(totalGPUs)
+			savingsPerGPU += cost * ratio
 		}
 		monthlySavings := (float64(reduction) / float64(totalGPUs)) * savingsPerGPU
 		if monthlySavings > 100 {
+			utilPct := (estimatedReqPerGPU / 50000) * 100
+			if utilPct > 100 {
+				utilPct = 100
+			}
 			recs = append(recs, Recommendation{
 				Category:          "infra_downsize",
-				Description:       fmt.Sprintf("Reduce GPU cluster from %d to ~%d nodes (%.0f%% utilization) — save $%.0f/mo", totalGPUs, totalGPUs-reduction, estimatedReqPerGPU/min(estimatedReqPerGPU*2, estimatedReqPerGPU+50000)*100, monthlySavings),
+				Description:       fmt.Sprintf("Reduce GPU cluster from %d to ~%d nodes (%.0f%% utilization) — save $%.0f/mo", totalGPUs, totalGPUs-reduction, utilPct, monthlySavings),
 				CurrentCost:       savingsPerGPU,
 				ProjectedCost:     savingsPerGPU - monthlySavings,
 				MonthlySavings:    monthlySavings,
@@ -254,9 +322,17 @@ func recommendInfraDownsize(a *Assessment) []Recommendation {
 func recommendProviderSwitch(costBreakdown []CostProjection) []Recommendation {
 	var recs []Recommendation
 	providerCosts := make(map[string]float64)
+	providerModels := make(map[string][]CostProjection)
 	for _, cp := range costBreakdown {
 		providerCosts[cp.Provider] += cp.CurrentMonthlyCost
+		providerModels[cp.Provider] = append(providerModels[cp.Provider], cp)
 	}
+
+	selfHostedAlt := FindModel("llama-3-70b")
+	if selfHostedAlt == nil {
+		return nil
+	}
+	targetAvg := (selfHostedAlt.InputPrice + selfHostedAlt.OutputPrice) / 2
 
 	for provider, cost := range providerCosts {
 		if provider == "self-hosted" {
@@ -265,18 +341,29 @@ func recommendProviderSwitch(costBreakdown []CostProjection) []Recommendation {
 		if cost < 500 {
 			continue
 		}
-		selfHostedAlt := FindModel("llama-3-70b")
-		if selfHostedAlt == nil {
-			continue
+		var providerSavings float64
+		for _, cp := range providerModels[provider] {
+			mi := FindModel(cp.Model)
+			if mi == nil {
+				continue
+			}
+			currentAvg := (mi.InputPrice + mi.OutputPrice) / 2
+			if currentAvg <= 0 {
+				continue
+			}
+			savingsRatio := 1 - targetAvg/currentAvg
+			if savingsRatio <= 0 {
+				continue
+			}
+			providerSavings += cp.CurrentMonthlyCost * savingsRatio
 		}
-		savings := cost * 0.6
-		if savings > 200 {
+		if providerSavings > 200 {
 			recs = append(recs, Recommendation{
 				Category:          "provider_switch",
-				Description:       fmt.Sprintf("Move %s workloads ($%.0f/mo) to self-hosted Llama-3-70B — estimated savings $%.0f/mo", provider, cost, savings),
+				Description:       fmt.Sprintf("Move %s workloads ($%.0f/mo) to self-hosted Llama-3-70B — estimated savings $%.0f/mo", provider, cost, providerSavings),
 				CurrentCost:       cost,
-				ProjectedCost:     cost - savings,
-				MonthlySavings:    savings,
+				ProjectedCost:     cost - providerSavings,
+				MonthlySavings:    providerSavings,
 				PaybackPeriodDays: 30,
 				Priority:          "medium",
 			})
@@ -483,14 +570,17 @@ func CompareProjections(store Store, assessmentID int, actualCosts map[string]fl
 		actual := actualCosts[cp.Model]
 		variance := actual - cp.ProjectedMonthlyCost
 		variancePct := 0.0
+		direction := "on_track"
 		if cp.ProjectedMonthlyCost > 0 {
 			variancePct = (variance / cp.ProjectedMonthlyCost) * 100
-		}
-		direction := "on_track"
-		if variance > cp.ProjectedMonthlyCost*0.1 {
+			if variance > cp.ProjectedMonthlyCost*0.1 {
+				direction = "over"
+			} else if variance < -cp.ProjectedMonthlyCost*0.1 {
+				direction = "under"
+			}
+		} else if actual > 0 {
 			direction = "over"
-		} else if variance < -cp.ProjectedMonthlyCost*0.1 {
-			direction = "under"
+			variancePct = 100
 		}
 		entries = append(entries, VarianceEntry{
 			Model:           cp.Model,
@@ -513,11 +603,12 @@ func RunWhatIf(store Store, assessmentID int, adjustments map[string]float64) ([
 	if err != nil {
 		return nil, err
 	}
+	a = copyAssessment(a)
 
-	if v, ok := adjustments["volume_multiplier"]; ok {
+	if v, ok := adjustments["volume_multiplier"]; ok && v > 0 {
 		a.MonthlyRequestVolume = int64(float64(a.MonthlyRequestVolume) * v)
 	}
-	if v, ok := adjustments["input_pct"]; ok {
+	if v, ok := adjustments["input_pct"]; ok && v >= 0 && v <= 1 {
 		a.TokenDistribution.InputPct = v
 		a.TokenDistribution.OutputPct = 1 - v
 	}
