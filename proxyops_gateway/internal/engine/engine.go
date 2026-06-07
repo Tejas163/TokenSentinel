@@ -97,6 +97,7 @@ func RunAssessment(store Store, assessmentID int) (*AssessmentReport, error) {
 	store.ReplaceCostProjections(assessmentID, costBreakdown)
 	store.ReplaceRecommendations(assessmentID, recommendations)
 
+	currency := a.EffectiveCurrency()
 	return &AssessmentReport{
 		Assessment:      *a,
 		CostBreakdown:   costBreakdown,
@@ -104,10 +105,13 @@ func RunAssessment(store Store, assessmentID int) (*AssessmentReport, error) {
 		TotalCurrent:    totalCurrent,
 		TotalProjected:  totalProjected,
 		TotalSavings:    totalSavings,
+		Currency:        currency,
+		CurrencySymbol:  CurrencySymbol(currency),
 	}, nil
 }
 
 func calculateCostBreakdown(a *Assessment, liveData *AssessmentLiveData) []CostProjection {
+	fxRate := a.EffectiveFXRate()
 	liveModels := make(map[string]bool)
 	var projections []CostProjection
 
@@ -116,14 +120,15 @@ func calculateCostBreakdown(a *Assessment, liveData *AssessmentLiveData) []CostP
 			liveModels[model] = true
 			mi := FindModel(model)
 			provider := "unknown"
-			inputPrice := fallbackInputPrice
-			outputPrice := fallbackOutputPrice
+			usdInput := fallbackInputPrice
+			usdOutput := fallbackOutputPrice
 			if mi != nil {
 				provider = mi.Provider
-				inputPrice = mi.InputPrice
-				outputPrice = mi.OutputPrice
+				usdInput = mi.InputPrice
+				usdOutput = mi.OutputPrice
 			}
-			currentCost := (float64(usage.InputTokens)/1_000_000)*inputPrice + (float64(usage.OutputTokens)/1_000_000)*outputPrice
+			usdCost := (float64(usage.InputTokens)/1_000_000)*usdInput + (float64(usage.OutputTokens)/1_000_000)*usdOutput
+			currentCost := usdCost * fxRate
 			inputM := float64(usage.InputTokens) / 1_000_000
 			outputM := float64(usage.OutputTokens) / 1_000_000
 			projections = append(projections, CostProjection{
@@ -146,14 +151,16 @@ func calculateCostBreakdown(a *Assessment, liveData *AssessmentLiveData) []CostP
 				}
 				mi := FindModel(model)
 				provider := pu.Name
-				inputPrice := fallbackInputPrice
-				outputPrice := fallbackOutputPrice
+				usdInput := fallbackInputPrice
+				usdOutput := fallbackOutputPrice
 				if mi != nil {
-					inputPrice = mi.InputPrice
-					outputPrice = mi.OutputPrice
+					usdInput = mi.InputPrice
+					usdOutput = mi.OutputPrice
 					provider = mi.Provider
 				}
-				avgPricePerM := (inputPrice + outputPrice) / 2
+				localInput := usdInput * fxRate
+				localOutput := usdOutput * fxRate
+				avgPricePerM := (localInput + localOutput) / 2
 				modelFraction := 1.0 / float64(len(pu.Models))
 				modelSpend := pu.MonthlySpend * modelFraction
 				totalTokensK := modelSpend / avgPricePerM * 1000
@@ -180,28 +187,31 @@ func calculateCostBreakdown(a *Assessment, liveData *AssessmentLiveData) []CostP
 }
 
 func generateRecommendations(a *Assessment, costBreakdown []CostProjection) []Recommendation {
+	fxRate := a.EffectiveFXRate()
+	currency := a.EffectiveCurrency()
+	sym := CurrencySymbol(currency)
 	var recs []Recommendation
 
 	for _, cp := range costBreakdown {
-		subRecs := recommendModelSubstitution(&cp)
+		subRecs := recommendModelSubstitution(&cp, fxRate, sym)
 		recs = append(recs, subRecs...)
 	}
 
 	if len(a.GPUConfigs) > 0 {
-		infraRecs := recommendInfraDownsize(a)
+		infraRecs := recommendInfraDownsize(a, fxRate, sym)
 		recs = append(recs, infraRecs...)
 	}
 
-	providerRecs := recommendProviderSwitch(costBreakdown)
+	providerRecs := recommendProviderSwitch(costBreakdown, fxRate, sym)
 	recs = append(recs, providerRecs...)
 
-	batchRecs := recommendBatchOptimization(a, costBreakdown)
+	batchRecs := recommendBatchOptimization(a, costBreakdown, fxRate, sym)
 	recs = append(recs, batchRecs...)
 
 	return recs
 }
 
-func recommendModelSubstitution(cp *CostProjection) []Recommendation {
+func recommendModelSubstitution(cp *CostProjection, fxRate float64, sym string) []Recommendation {
 	mi := FindModel(cp.Model)
 	if mi == nil || mi.Tier == TierCheap {
 		return nil
@@ -248,7 +258,7 @@ func recommendModelSubstitution(cp *CostProjection) []Recommendation {
 
 	return []Recommendation{{
 		Category:          "model_switch",
-		Description:       fmt.Sprintf("Switch %s from %s to %s — save $%.0f/mo", cp.Model, mi.Provider, best.Provider, bestSavings),
+		Description:       fmt.Sprintf("Switch %s from %s to %s — save %s%.0f/mo", cp.Model, mi.Provider, best.Provider, sym, bestSavings),
 		CurrentCost:       cp.CurrentMonthlyCost,
 		ProjectedCost:     cp.CurrentMonthlyCost - bestSavings,
 		MonthlySavings:    bestSavings,
@@ -257,7 +267,7 @@ func recommendModelSubstitution(cp *CostProjection) []Recommendation {
 	}}
 }
 
-func recommendInfraDownsize(a *Assessment) []Recommendation {
+func recommendInfraDownsize(a *Assessment, fxRate float64, sym string) []Recommendation {
 	var recs []Recommendation
 	totalGPUs := 0
 	for _, gpu := range a.GPUConfigs {
@@ -285,7 +295,7 @@ func recommendInfraDownsize(a *Assessment) []Recommendation {
 			if hourlyPrice <= 0 {
 				ref := FindGPUReference(gpu.Type)
 				if ref != nil {
-					hourlyPrice = ref.HourlyPrice
+					hourlyPrice = ref.HourlyPrice * fxRate
 				}
 			}
 			if hourlyPrice <= 0 {
@@ -300,14 +310,15 @@ func recommendInfraDownsize(a *Assessment) []Recommendation {
 			savingsPerGPU += cost * ratio
 		}
 		monthlySavings := (float64(reduction) / float64(totalGPUs)) * savingsPerGPU
-		if monthlySavings > 100 {
+		localThreshold := 100.0 * fxRate
+		if monthlySavings > localThreshold {
 			utilPct := (estimatedReqPerGPU / 50000) * 100
 			if utilPct > 100 {
 				utilPct = 100
 			}
 			recs = append(recs, Recommendation{
 				Category:          "infra_downsize",
-				Description:       fmt.Sprintf("Reduce GPU cluster from %d to ~%d nodes (%.0f%% utilization) — save $%.0f/mo", totalGPUs, totalGPUs-reduction, utilPct, monthlySavings),
+				Description:       fmt.Sprintf("Reduce GPU cluster from %d to ~%d nodes (%.0f%% utilization) — save %s%.0f/mo", totalGPUs, totalGPUs-reduction, utilPct, sym, monthlySavings),
 				CurrentCost:       savingsPerGPU,
 				ProjectedCost:     savingsPerGPU - monthlySavings,
 				MonthlySavings:    monthlySavings,
@@ -319,7 +330,7 @@ func recommendInfraDownsize(a *Assessment) []Recommendation {
 	return recs
 }
 
-func recommendProviderSwitch(costBreakdown []CostProjection) []Recommendation {
+func recommendProviderSwitch(costBreakdown []CostProjection, fxRate float64, sym string) []Recommendation {
 	var recs []Recommendation
 	providerCosts := make(map[string]float64)
 	providerModels := make(map[string][]CostProjection)
@@ -332,13 +343,14 @@ func recommendProviderSwitch(costBreakdown []CostProjection) []Recommendation {
 	if selfHostedAlt == nil {
 		return nil
 	}
-	targetAvg := (selfHostedAlt.InputPrice + selfHostedAlt.OutputPrice) / 2
+	targetAvgLocal := ((selfHostedAlt.InputPrice + selfHostedAlt.OutputPrice) / 2) * fxRate
 
+	localMinSpend := 500.0 * fxRate
 	for provider, cost := range providerCosts {
 		if provider == "self-hosted" {
 			continue
 		}
-		if cost < 500 {
+		if cost < localMinSpend {
 			continue
 		}
 		var providerSavings float64
@@ -347,20 +359,21 @@ func recommendProviderSwitch(costBreakdown []CostProjection) []Recommendation {
 			if mi == nil {
 				continue
 			}
-			currentAvg := (mi.InputPrice + mi.OutputPrice) / 2
-			if currentAvg <= 0 {
+			currentAvgLocal := ((mi.InputPrice + mi.OutputPrice) / 2) * fxRate
+			if currentAvgLocal <= 0 {
 				continue
 			}
-			savingsRatio := 1 - targetAvg/currentAvg
+			savingsRatio := 1 - targetAvgLocal/currentAvgLocal
 			if savingsRatio <= 0 {
 				continue
 			}
 			providerSavings += cp.CurrentMonthlyCost * savingsRatio
 		}
-		if providerSavings > 200 {
+		localThreshold := 200.0 * fxRate
+		if providerSavings > localThreshold {
 			recs = append(recs, Recommendation{
 				Category:          "provider_switch",
-				Description:       fmt.Sprintf("Move %s workloads ($%.0f/mo) to self-hosted Llama-3-70B — estimated savings $%.0f/mo", provider, cost, providerSavings),
+				Description:       fmt.Sprintf("Move %s workloads (%s%.0f/mo) to self-hosted Llama-3-70B — estimated savings %s%.0f/mo", provider, sym, cost, sym, providerSavings),
 				CurrentCost:       cost,
 				ProjectedCost:     cost - providerSavings,
 				MonthlySavings:    providerSavings,
@@ -372,7 +385,7 @@ func recommendProviderSwitch(costBreakdown []CostProjection) []Recommendation {
 	return recs
 }
 
-func recommendBatchOptimization(a *Assessment, costBreakdown []CostProjection) []Recommendation {
+func recommendBatchOptimization(a *Assessment, costBreakdown []CostProjection, fxRate float64, sym string) []Recommendation {
 	if a.MonthlyRequestVolume < 100000 {
 		return nil
 	}
@@ -383,12 +396,13 @@ func recommendBatchOptimization(a *Assessment, costBreakdown []CostProjection) [
 		totalCost += cp.CurrentMonthlyCost
 	}
 	savings := totalCost * batchableFraction * offPeakDiscount
-	if savings < 50 {
+	localThreshold := 50.0 * fxRate
+	if savings < localThreshold {
 		return nil
 	}
 	return []Recommendation{{
 		Category:          "batch_optimization",
-		Description:       fmt.Sprintf("Move %.0f%% of workloads to batch/off-peak (estimated %.0f%% discount) — save $%.0f/mo", batchableFraction*100, offPeakDiscount*100, savings),
+		Description:       fmt.Sprintf("Move %.0f%% of workloads to batch/off-peak (estimated %.0f%% discount) — save %s%.0f/mo", batchableFraction*100, offPeakDiscount*100, sym, savings),
 		CurrentCost:       totalCost,
 		ProjectedCost:     totalCost - savings,
 		MonthlySavings:    savings,
@@ -426,6 +440,7 @@ func GetReport(store Store, assessmentID int) (*AssessmentReport, error) {
 		totalProjected = 0
 	}
 
+	currency := a.EffectiveCurrency()
 	return &AssessmentReport{
 		Assessment:      *a,
 		CostBreakdown:   projections,
@@ -433,6 +448,8 @@ func GetReport(store Store, assessmentID int) (*AssessmentReport, error) {
 		TotalCurrent:    totalCurrent,
 		TotalProjected:  totalProjected,
 		TotalSavings:    totalSavings,
+		Currency:        currency,
+		CurrencySymbol:  CurrencySymbol(currency),
 	}, nil
 }
 
@@ -447,7 +464,11 @@ type RoutingRule struct {
 	Tags            []string `json:"tags,omitempty"`
 }
 
-func GetRoutingRules(models []string) []RoutingRule {
+func GetRoutingRules(models []string, fxRate ...float64) []RoutingRule {
+	rate := 1.0
+	if len(fxRate) > 0 && fxRate[0] > 0 {
+		rate = fxRate[0]
+	}
 	type candidate struct {
 		model   *ModelInfo
 		target  *ModelInfo
@@ -488,12 +509,14 @@ func GetRoutingRules(models []string) []RoutingRule {
 		} else if best.savings < 0.1 {
 			confidence = "low"
 		}
+		currentPrice := currentAvgPrice(mi) * rate
+		targetPrice := currentAvgPrice(best.target) * rate
 		rules = append(rules, RoutingRule{
 			Model:           mi.Name,
 			SuggestedTarget: best.target.Name,
-			Reason:          fmt.Sprintf("Switch %s ($%.2f/Mtok) to %s ($%.2f/Mtok) — save %.0f%%", mi.Name, currentAvgPrice(mi), best.target.Name, currentAvgPrice(best.target), best.savings*100),
-			CurrentPrice:    currentAvgPrice(mi),
-			TargetPrice:     currentAvgPrice(best.target),
+			Reason:          fmt.Sprintf("Switch %s ($%.2f/Mtok) to %s ($%.2f/Mtok) — save %.0f%%", mi.Name, currentPrice, best.target.Name, targetPrice, best.savings*100),
+			CurrentPrice:    currentPrice,
+			TargetPrice:     targetPrice,
 			SavingsPercent:  best.savings * 100,
 			Confidence:      confidence,
 			Tags:            tags,

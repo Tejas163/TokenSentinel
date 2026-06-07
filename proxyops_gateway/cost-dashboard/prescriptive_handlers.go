@@ -172,11 +172,13 @@ func listAssessments(w http.ResponseWriter, r *http.Request) {
 	var err error
 	if orgID != "" {
 		rows, err = db.Query(`SELECT id, org_id, company_name, cloud_vendor, gpu_configs, monthly_request_volume,
-			token_distribution, current_monthly_spend, providers_used, team_composition, source, version, created_at, updated_at
+			token_distribution, current_monthly_spend, providers_used, team_composition, source,
+			currency, fx_rate, version, created_at, updated_at
 			FROM assessments WHERE org_id = $1 ORDER BY updated_at DESC LIMIT $2 OFFSET $3`, orgID, limit, offset)
 	} else {
 		rows, err = db.Query(`SELECT id, org_id, company_name, cloud_vendor, gpu_configs, monthly_request_volume,
-			token_distribution, current_monthly_spend, providers_used, team_composition, source, version, created_at, updated_at
+			token_distribution, current_monthly_spend, providers_used, team_composition, source,
+			currency, fx_rate, version, created_at, updated_at
 			FROM assessments ORDER BY updated_at DESC LIMIT $1 OFFSET $2`, limit, offset)
 	}
 	if err != nil {
@@ -192,7 +194,8 @@ func listAssessments(w http.ResponseWriter, r *http.Request) {
 		var gpuJSON, tokenJSON, providerJSON, teamJSON []byte
 		var createdAt, updatedAt time.Time
 		if err := rows.Scan(&a.ID, &a.OrgID, &a.CompanyName, &a.CloudVendor, &gpuJSON, &a.MonthlyRequestVolume,
-			&tokenJSON, &a.CurrentMonthlySpend, &providerJSON, &teamJSON, &a.Source, &a.Version, &createdAt, &updatedAt); err != nil {
+			&tokenJSON, &a.CurrentMonthlySpend, &providerJSON, &teamJSON, &a.Source,
+			&a.Currency, &a.FXRate, &a.Version, &createdAt, &updatedAt); err != nil {
 			log.Printf("scan assessment: %v", err)
 			continue
 		}
@@ -242,10 +245,11 @@ func createAssessment(w http.ResponseWriter, r *http.Request) {
 
 	var id int
 	err := db.QueryRow(`INSERT INTO assessments (org_id, company_name, cloud_vendor, gpu_configs, monthly_request_volume,
-		token_distribution, current_monthly_spend, providers_used, team_composition, source)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+		token_distribution, current_monthly_spend, providers_used, team_composition, source, currency, fx_rate)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
 		a.OrgID, a.CompanyName, a.CloudVendor, gpuJSON, a.MonthlyRequestVolume,
 		tokenJSON, a.CurrentMonthlySpend, providerJSON, teamJSON, a.Source,
+		a.EffectiveCurrency(), a.EffectiveFXRate(),
 	).Scan(&id)
 	if err != nil {
 		log.Printf("create assessment error: %v", err)
@@ -273,10 +277,12 @@ func getAssessment(w http.ResponseWriter, r *http.Request, id int) {
 	var createdAt, updatedAt time.Time
 
 	err := db.QueryRow(`SELECT id, company_name, cloud_vendor, gpu_configs, monthly_request_volume,
-		token_distribution, current_monthly_spend, providers_used, team_composition, source, version, created_at, updated_at
+		token_distribution, current_monthly_spend, providers_used, team_composition, source,
+		currency, fx_rate, version, created_at, updated_at
 		FROM assessments WHERE id = $1`, id).Scan(
 		&a.ID, &a.CompanyName, &a.CloudVendor, &gpuJSON, &a.MonthlyRequestVolume,
-		&tokenJSON, &a.CurrentMonthlySpend, &providerJSON, &teamJSON, &a.Source, &a.Version, &createdAt, &updatedAt)
+		&tokenJSON, &a.CurrentMonthlySpend, &providerJSON, &teamJSON, &a.Source,
+		&a.Currency, &a.FXRate, &a.Version, &createdAt, &updatedAt)
 	if err == sql.ErrNoRows {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
@@ -340,9 +346,10 @@ func updateAssessment(w http.ResponseWriter, r *http.Request, id int) {
 	newVersion := existing.Version + 1
 	_, err = db.Exec(`UPDATE assessments SET company_name=$1, cloud_vendor=$2, gpu_configs=$3,
 		monthly_request_volume=$4, token_distribution=$5, current_monthly_spend=$6, providers_used=$7,
-		team_composition=$8, source=$9, version=$10, updated_at=NOW() WHERE id=$11`,
+		team_composition=$8, source=$9, currency=$10, fx_rate=$11, version=$12, updated_at=NOW() WHERE id=$13`,
 		a.CompanyName, a.CloudVendor, gpuJSON, a.MonthlyRequestVolume,
-		tokenJSON, a.CurrentMonthlySpend, providerJSON, teamJSON, a.Source, newVersion, id)
+		tokenJSON, a.CurrentMonthlySpend, providerJSON, teamJSON, a.Source,
+		a.EffectiveCurrency(), a.EffectiveFXRate(), newVersion, id)
 	if err != nil {
 		log.Printf("update assessment error: %v", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)

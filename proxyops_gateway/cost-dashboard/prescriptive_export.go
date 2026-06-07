@@ -40,6 +40,11 @@ func exportCSV(w http.ResponseWriter, assessmentID int) {
 		return
 	}
 
+	sym := report.CurrencySymbol
+	if sym == "" {
+		sym = "$"
+	}
+
 	w.Header().Set("Content-Type", "text/csv")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=TokenSentinel_Assessment_%d_Report.csv", assessmentID))
 
@@ -51,9 +56,9 @@ func exportCSV(w http.ResponseWriter, assessmentID int) {
 
 	writer.Write([]string{"EXECUTIVE SUMMARY"})
 	writer.Write([]string{"Metric", "Value"})
-	writer.Write([]string{"Current Monthly Spend", fmt.Sprintf("$%.2f", report.TotalCurrent)})
-	writer.Write([]string{"Projected Monthly Spend", fmt.Sprintf("$%.2f", report.TotalProjected)})
-	writer.Write([]string{"Projected Monthly Savings", fmt.Sprintf("$%.2f", report.TotalSavings)})
+	writer.Write([]string{"Current Monthly Spend", fmt.Sprintf(sym+"%.2f", report.TotalCurrent)})
+	writer.Write([]string{"Projected Monthly Spend", fmt.Sprintf(sym+"%.2f", report.TotalProjected)})
+	writer.Write([]string{"Projected Monthly Savings", fmt.Sprintf(sym+"%.2f", report.TotalSavings)})
 	if report.TotalCurrent > 0 {
 		writer.Write([]string{"Savings Rate", fmt.Sprintf("%.1f%%", (report.TotalSavings/report.TotalCurrent)*100)})
 	}
@@ -93,7 +98,7 @@ func exportCSV(w http.ResponseWriter, assessmentID int) {
 		for _, r := range report.Recommendations {
 			totalSavings += r.MonthlySavings
 		}
-		writer.Write([]string{"Total Potential Monthly Savings from Recommendations", fmt.Sprintf("$%.2f", totalSavings)})
+		writer.Write([]string{"Total Potential Monthly Savings from Recommendations", fmt.Sprintf(sym+"%.2f", totalSavings)})
 	}
 
 	writer.Flush()
@@ -113,6 +118,11 @@ func exportPDF(w http.ResponseWriter, assessmentID int) {
 }
 
 func generatePDF(w http.ResponseWriter, report *engine.AssessmentReport) {
+	sym := report.CurrencySymbol
+	if sym == "" {
+		sym = "$"
+	}
+
 	m := maroto.New(config.NewBuilder().
 		WithLeftMargin(15).
 		WithRightMargin(15).
@@ -133,7 +143,7 @@ func generatePDF(w http.ResponseWriter, report *engine.AssessmentReport) {
 
 	if report.TotalCurrent > 0 {
 		savingsRate := (report.TotalSavings / report.TotalCurrent) * 100
-		m.AddRows(row.New(20).Add(col.New(12).Add(text.New(fmt.Sprintf("Total Potential Savings: $%.0f/mo (%.0f%%)",
+		m.AddRows(row.New(20).Add(col.New(12).Add(text.New(fmt.Sprintf("Total Potential Savings: "+sym+"%.0f/mo (%.0f%%)",
 			report.TotalSavings, savingsRate), props.Text{
 			Style: fontstyle.Bold,
 			Size:  14,
@@ -143,9 +153,9 @@ func generatePDF(w http.ResponseWriter, report *engine.AssessmentReport) {
 	}
 
 	m.AddRows(row.New(12).Add(col.New(12).Add(text.New("1. Executive Summary", props.Text{Style: fontstyle.Bold, Size: 14, Align: align.Left}))))
-	m.AddRows(row.New(8).Add(col.New(12).Add(text.New(fmt.Sprintf("Your current monthly AI infrastructure spend is $%.2f.", report.TotalCurrent), props.Text{Size: 10, Align: align.Left}))))
-	m.AddRows(row.New(8).Add(col.New(12).Add(text.New(fmt.Sprintf("After applying the recommended optimizations in this report, your projected monthly spend is $%.2f.", report.TotalProjected), props.Text{Size: 10, Align: align.Left}))))
-	m.AddRows(row.New(8).Add(col.New(12).Add(text.New(fmt.Sprintf("This represents a potential savings of $%.2f per month.", report.TotalSavings), props.Text{Size: 10, Align: align.Left}))))
+	m.AddRows(row.New(8).Add(col.New(12).Add(text.New(fmt.Sprintf("Your current monthly AI infrastructure spend is "+sym+"%.2f.", report.TotalCurrent), props.Text{Size: 10, Align: align.Left}))))
+	m.AddRows(row.New(8).Add(col.New(12).Add(text.New(fmt.Sprintf("After applying the recommended optimizations in this report, your projected monthly spend is "+sym+"%.2f.", report.TotalProjected), props.Text{Size: 10, Align: align.Left}))))
+	m.AddRows(row.New(8).Add(col.New(12).Add(text.New(fmt.Sprintf("This represents a potential savings of "+sym+"%.2f per month.", report.TotalSavings), props.Text{Size: 10, Align: align.Left}))))
 	if report.TotalCurrent > 0 {
 		m.AddRows(row.New(8).Add(col.New(12).Add(text.New(fmt.Sprintf("Your estimated savings rate is %.1f%%, meaning you could reduce your AI costs by nearly %.0f%% with the changes outlined below.",
 			(report.TotalSavings/report.TotalCurrent)*100, (report.TotalSavings/report.TotalCurrent)*100), props.Text{Size: 10, Align: align.Left}))))
@@ -165,7 +175,7 @@ func generatePDF(w http.ResponseWriter, report *engine.AssessmentReport) {
 			col.New(2).Add(text.New(strings.ToUpper(r.Priority), props.Text{
 				Style: fontstyle.Bold, Size: 9, Align: align.Left,
 			})),
-			col.New(9).Add(text.New(fmt.Sprintf("$%.0f/mo savings", r.MonthlySavings), props.Text{
+			col.New(9).Add(text.New(fmt.Sprintf(sym+"%.0f/mo savings", r.MonthlySavings), props.Text{
 				Size: 10, Align: align.Left,
 			})),
 		))
@@ -175,7 +185,7 @@ func generatePDF(w http.ResponseWriter, report *engine.AssessmentReport) {
 		))
 		m.AddRows(row.New(8).Add(
 			col.New(1).Add(text.New("", props.Text{Size: 8})),
-			col.New(11).Add(text.New(fmt.Sprintf("Category: %s | Current spend: $%.0f/mo | Payback: %d days",
+			col.New(11).Add(text.New(fmt.Sprintf("Category: %s | Current spend: "+sym+"%.0f/mo | Payback: %d days",
 				strings.ReplaceAll(r.Category, "_", " "), r.CurrentCost, r.PaybackPeriodDays), props.Text{Size: 8, Align: align.Left})),
 		))
 		}
@@ -201,8 +211,8 @@ func generatePDF(w http.ResponseWriter, report *engine.AssessmentReport) {
 				col.New(3).Add(text.New(cp.Provider, props.Text{Size: 8, Align: align.Left})),
 				col.New(2).Add(text.New(fmt.Sprintf("%.2f", cp.InputTokensMillions), props.Text{Size: 8, Align: align.Right, Right: 3})),
 				col.New(2).Add(text.New(fmt.Sprintf("%.2f", cp.OutputTokensMillions), props.Text{Size: 8, Align: align.Right, Right: 3})),
-				col.New(1).Add(text.New(fmt.Sprintf("$%.0f", cp.CurrentMonthlyCost), props.Text{Size: 7, Align: align.Right, Right: 2})),
-				col.New(1).Add(text.New(fmt.Sprintf("$%.0f", cp.ProjectedMonthlyCost), props.Text{Size: 7, Align: align.Right, Right: 2})),
+				col.New(1).Add(text.New(fmt.Sprintf(sym+"%.0f", cp.CurrentMonthlyCost), props.Text{Size: 7, Align: align.Right, Right: 2})),
+				col.New(1).Add(text.New(fmt.Sprintf(sym+"%.0f", cp.ProjectedMonthlyCost), props.Text{Size: 7, Align: align.Right, Right: 2})),
 			))
 		}
 		m.AddRows(row.New(10).Add(col.New(12).Add(text.New("", props.Text{}))))

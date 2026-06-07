@@ -25,6 +25,8 @@ func initPrescriptiveTables(db *sql.DB) error {
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 		`ALTER TABLE assessments ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE assessments ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'USD'`,
+		`ALTER TABLE assessments ADD COLUMN IF NOT EXISTS fx_rate NUMERIC(10,4) NOT NULL DEFAULT 1.0`,
 		`CREATE TABLE IF NOT EXISTS recommendations (
 			id SERIAL PRIMARY KEY,
 			assessment_id INTEGER NOT NULL REFERENCES assessments(id) ON DELETE CASCADE,

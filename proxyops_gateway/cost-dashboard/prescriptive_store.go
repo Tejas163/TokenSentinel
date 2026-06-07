@@ -20,10 +20,12 @@ func (s *pgStore) GetAssessment(id int) (*engine.Assessment, error) {
 	var createdAt, updatedAt time.Time
 
 	err := s.db.QueryRow(`SELECT id, company_name, cloud_vendor, gpu_configs, monthly_request_volume,
-		token_distribution, current_monthly_spend, providers_used, team_composition, source, version, created_at, updated_at
+		token_distribution, current_monthly_spend, providers_used, team_composition, source,
+		currency, fx_rate, version, created_at, updated_at
 		FROM assessments WHERE id = $1`, id).Scan(
 		&a.ID, &a.CompanyName, &a.CloudVendor, &gpuJSON, &a.MonthlyRequestVolume,
-		&tokenJSON, &a.CurrentMonthlySpend, &providerJSON, &teamJSON, &a.Source, &a.Version, &createdAt, &updatedAt)
+		&tokenJSON, &a.CurrentMonthlySpend, &providerJSON, &teamJSON, &a.Source,
+		&a.Currency, &a.FXRate, &a.Version, &createdAt, &updatedAt)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("assessment %d not found", id)
 	}
@@ -70,11 +72,11 @@ func (s *pgStore) QueryLiveCostData(since time.Time) (*engine.AssessmentLiveData
 			OutputTokens: outputSum,
 			RequestCount: count,
 		}
-		inputCost := (float64(inputSum) / 1000) * 30.00
-		outputCost := (float64(outputSum) / 1000) * 60.00
+		inputCost := (float64(inputSum) / 1_000_000) * 30.00
+		outputCost := (float64(outputSum) / 1_000_000) * 60.00
 		if mi := engine.FindModel(model); mi != nil {
-			inputCost = (float64(inputSum) / 1000) * mi.InputPrice
-			outputCost = (float64(outputSum) / 1000) * mi.OutputPrice
+			inputCost = (float64(inputSum) / 1_000_000) * mi.InputPrice
+			outputCost = (float64(outputSum) / 1_000_000) * mi.OutputPrice
 		}
 		ld.TotalMonthlyCost += inputCost + outputCost
 	}

@@ -364,7 +364,7 @@ func TestRecommendModelSubstitution_NoCheapSub(t *testing.T) {
 }
 
 func TestRecommendGPUInfra_NoGPUs(t *testing.T) {
-	recs := recommendInfraDownsize(&Assessment{GPUConfigs: nil})
+	recs := recommendInfraDownsize(&Assessment{GPUConfigs: nil}, 1.0, "$")
 	if len(recs) != 0 {
 		t.Errorf("expected 0 infra recs with no GPUs, got %d", len(recs))
 	}
@@ -413,7 +413,7 @@ func TestRecommendProviderSwitch_SelfHostedSkipped(t *testing.T) {
 	costBreakdown := []CostProjection{
 		{Model: "llama-3-70b", Provider: "self-hosted", CurrentMonthlyCost: 5000},
 	}
-	recs := recommendProviderSwitch(costBreakdown)
+	recs := recommendProviderSwitch(costBreakdown, 1.0, "$")
 	for _, r := range recs {
 		if r.Category == "provider_switch" {
 			t.Errorf("did not expect provider_switch for self-hosted: %s", r.Description)
@@ -423,7 +423,7 @@ func TestRecommendProviderSwitch_SelfHostedSkipped(t *testing.T) {
 
 func TestRecommendBatchOptimization_LowVolume(t *testing.T) {
 	a := &Assessment{MonthlyRequestVolume: 50000}
-	recs := recommendBatchOptimization(a, nil)
+	recs := recommendBatchOptimization(a, nil, 1.0, "$")
 	if len(recs) != 0 {
 		t.Errorf("expected 0 batch recs for low volume, got %d", len(recs))
 	}

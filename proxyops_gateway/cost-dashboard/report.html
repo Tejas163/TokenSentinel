@@ -119,6 +119,7 @@ let reportData = null;
 let whatIfBase = null;
 let assessmentId = null;
 const REPORT_DATA = {{.ReportJSON}};
+var CURRENCY_SYMBOL = REPORT_DATA.currency_symbol || '$';
 const TEMPLATE_KEY = '{{.APIKey}}';
 const API_KEY = TEMPLATE_KEY || new URLSearchParams(window.location.search).get('api_key') || '';
 
@@ -173,15 +174,15 @@ function render() {
 
 function renderSummary(d) {
   document.getElementById('summary-grid').innerHTML = [
-    '<div class="summary-card"><div class="value blue">$' + fmt(d.total_current_spend) + '</div><div class="label">Current Monthly Spend</div></div>',
-    '<div class="summary-card"><div class="value green">$' + fmt(d.total_monthly_savings) + '</div><div class="label">Projected Monthly Savings</div></div>',
-    '<div class="summary-card"><div class="value blue">$' + fmt(d.total_projected_spend) + '</div><div class="label">Projected Monthly Spend</div></div>',
+    '<div class="summary-card"><div class="value blue">' + CURRENCY_SYMBOL + fmt(d.total_current_spend) + '</div><div class="label">Current Monthly Spend</div></div>',
+    '<div class="summary-card"><div class="value green">' + CURRENCY_SYMBOL + fmt(d.total_monthly_savings) + '</div><div class="label">Projected Monthly Savings</div></div>',
+    '<div class="summary-card"><div class="value blue">' + CURRENCY_SYMBOL + fmt(d.total_projected_spend) + '</div><div class="label">Projected Monthly Spend</div></div>',
     '<div class="summary-card"><div class="value ' + (d.total_current_spend > 0 ? (d.total_monthly_savings/d.total_current_spend*100 > 20 ? 'green' : 'red') : 'blue') + '">' + (d.total_current_spend > 0 ? (d.total_monthly_savings/d.total_current_spend*100).toFixed(0) + '%' : '-') + '</div><div class="label">Savings Rate</div></div>'
   ].join('');
 
   if (d.recommendations && d.recommendations.length > 0) {
     var top = d.recommendations[0];
-    document.getElementById('top-rec').innerHTML = '<div class="rec-card ' + top.priority + '"><div class="rec-header"><span class="badge badge-' + top.priority + '">' + top.priority + '</span><span class="rec-savings">+$' + fmt(top.monthly_savings) + '/mo</span></div><div class="rec-desc">' + top.description + '</div></div>';
+    document.getElementById('top-rec').innerHTML = '<div class="rec-card ' + top.priority + '"><div class="rec-header"><span class="badge badge-' + top.priority + '">' + top.priority + '</span><span class="rec-savings">+' + CURRENCY_SYMBOL + fmt(top.monthly_savings) + '/mo</span></div><div class="rec-desc">' + top.description + '</div></div>';
   }
 }
 
@@ -197,8 +198,8 @@ function renderBreakdown(d) {
       '<td>' + c.provider + '</td>' +
       '<td>' + c.input_tokens_millions.toFixed(2) + '</td>' +
       '<td>' + c.output_tokens_millions.toFixed(2) + '</td>' +
-      '<td>$' + fmt(c.current_monthly_cost) + '</td>' +
-      '<td>$' + fmt(c.projected_monthly_cost) + '</td>' +
+      '<td>' + CURRENCY_SYMBOL + fmt(c.current_monthly_cost) + '</td>' +
+      '<td>' + CURRENCY_SYMBOL + fmt(c.projected_monthly_cost) + '</td>' +
       '</tr>';
   }).join('');
 }
@@ -211,9 +212,9 @@ function renderRecommendations(d) {
   }
   div.innerHTML = d.recommendations.map(function(r) {
     return '<div class="rec-card ' + r.priority + '">' +
-      '<div class="rec-header"><span class="badge badge-' + r.priority + '">' + r.priority + '</span><span class="rec-savings">+$' + fmt(r.monthly_savings) + '/mo</span></div>' +
+      '<div class="rec-header"><span class="badge badge-' + r.priority + '">' + r.priority + '</span><span class="rec-savings">+' + CURRENCY_SYMBOL + fmt(r.monthly_savings) + '/mo</span></div>' +
       '<div class="rec-desc">' + r.description + '</div>' +
-      '<div class="rec-meta">Category: ' + r.category.replace('_', ' ') + ' &middot; Current: $' + fmt(r.current_cost) + ' &middot; Payback: ' + r.payback_period_days + ' days</div>' +
+      '<div class="rec-meta">Category: ' + r.category.replace('_', ' ') + ' &middot; Current: ' + CURRENCY_SYMBOL + fmt(r.current_cost) + ' &middot; Payback: ' + r.payback_period_days + ' days</div>' +
       '</div>';
   }).join('');
 }
@@ -261,9 +262,9 @@ function updateWhatIf() {
   var totalChange = totalProjected - totalCurrent;
 
   document.getElementById('whatif-grid').innerHTML = [
-    '<div class="summary-card"><div class="value blue">$' + fmt(totalCurrent) + '</div><div class="label">Current</div></div>',
-    '<div class="summary-card"><div class="value ' + (totalChange <= 0 ? 'green' : 'red') + '">$' + fmt(totalProjected) + '</div><div class="label">Projected</div></div>',
-    '<div class="summary-card"><div class="value ' + (totalChange <= 0 ? 'green' : 'red') + '">' + (totalChange >= 0 ? '+' : '') + '$' + fmt(totalChange) + '</div><div class="label">Change</div></div>',
+    '<div class="summary-card"><div class="value blue">' + CURRENCY_SYMBOL + fmt(totalCurrent) + '</div><div class="label">Current</div></div>',
+    '<div class="summary-card"><div class="value ' + (totalChange <= 0 ? 'green' : 'red') + '">' + CURRENCY_SYMBOL + fmt(totalProjected) + '</div><div class="label">Projected</div></div>',
+    '<div class="summary-card"><div class="value ' + (totalChange <= 0 ? 'green' : 'red') + '">' + (totalChange >= 0 ? '+' : '') + CURRENCY_SYMBOL + fmt(totalChange) + '</div><div class="label">Change</div></div>',
     '<div class="summary-card"><div class="value blue">' + volPct + '%</div><div class="label">Volume</div></div>'
   ].join('');
 
@@ -271,9 +272,9 @@ function updateWhatIf() {
     var change = p.projected - p.current;
     return '<tr>' +
       '<td>' + p.model + '</td>' +
-      '<td>$' + fmt(p.current) + '</td>' +
-      '<td>$' + fmt(p.projected) + '</td>' +
-      '<td style="color:' + (change <= 0 ? '#22c55e' : '#ef4444') + '">' + (change >= 0 ? '+' : '') + '$' + fmt(change) + '</td>' +
+      '<td>' + CURRENCY_SYMBOL + fmt(p.current) + '</td>' +
+      '<td>' + CURRENCY_SYMBOL + fmt(p.projected) + '</td>' +
+      '<td style="color:' + (change <= 0 ? '#22c55e' : '#ef4444') + '">' + (change >= 0 ? '+' : '') + CURRENCY_SYMBOL + fmt(change) + '</td>' +
       '</tr>';
   }).join('');
 }

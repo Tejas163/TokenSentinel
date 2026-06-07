@@ -1,6 +1,60 @@
 package engine
 
-import "strings"
+import (
+	"strings"
+)
+
+type CurrencyInfo struct {
+	Code   string
+	Symbol string
+	Rate   float64
+}
+
+var Currencies = map[string]CurrencyInfo{
+	"USD": {Code: "USD", Symbol: "$", Rate: 1.0},
+	"INR": {Code: "INR", Symbol: "₹", Rate: 83.50},
+	"EUR": {Code: "EUR", Symbol: "€", Rate: 0.92},
+	"GBP": {Code: "GBP", Symbol: "£", Rate: 0.79},
+	"JPY": {Code: "JPY", Symbol: "¥", Rate: 151.00},
+	"CAD": {Code: "CAD", Symbol: "CA$", Rate: 1.36},
+	"AUD": {Code: "AUD", Symbol: "A$", Rate: 1.54},
+	"SGD": {Code: "SGD", Symbol: "S$", Rate: 1.35},
+	"BRL": {Code: "BRL", Symbol: "R$", Rate: 5.05},
+	"CHF": {Code: "CHF", Symbol: "Fr", Rate: 0.88},
+	"SEK": {Code: "SEK", Symbol: "kr", Rate: 10.50},
+	"NOK": {Code: "NOK", Symbol: "kr", Rate: 10.70},
+	"DKK": {Code: "DKK", Symbol: "kr", Rate: 6.90},
+	"PLN": {Code: "PLN", Symbol: "zł", Rate: 4.05},
+	"TRY": {Code: "TRY", Symbol: "₺", Rate: 30.50},
+	"KRW": {Code: "KRW", Symbol: "₩", Rate: 1320.00},
+	"CNY": {Code: "CNY", Symbol: "¥", Rate: 7.25},
+	"HKD": {Code: "HKD", Symbol: "HK$", Rate: 7.82},
+	"TWD": {Code: "TWD", Symbol: "NT$", Rate: 32.00},
+	"NZD": {Code: "NZD", Symbol: "NZ$", Rate: 1.63},
+	"MXN": {Code: "MXN", Symbol: "MX$", Rate: 17.20},
+}
+
+func CurrencySymbol(code string) string {
+	if c, ok := Currencies[code]; ok {
+		return c.Symbol
+	}
+	return "$"
+}
+
+func FXRate(code string) float64 {
+	if c, ok := Currencies[code]; ok {
+		return c.Rate
+	}
+	return 1.0
+}
+
+func ToUSD(amount float64, code string) float64 {
+	return amount / FXRate(code)
+}
+
+func FromUSD(amount float64, code string) float64 {
+	return amount * FXRate(code)
+}
 
 type GPUReference struct {
 	Type         string  `json:"type"`
@@ -110,9 +164,25 @@ type Assessment struct {
 	ProvidersUsed        []ProviderUsage   `json:"providers_used"`
 	TeamComposition      TeamComposition   `json:"team_composition"`
 	Source               string            `json:"source"`
+	Currency             string            `json:"currency"`
+	FXRate               float64           `json:"fx_rate"`
 	Version              int               `json:"version"`
 	CreatedAt            string            `json:"created_at"`
 	UpdatedAt            string            `json:"updated_at"`
+}
+
+func (a *Assessment) EffectiveFXRate() float64 {
+	if a.FXRate > 0 {
+		return a.FXRate
+	}
+	return FXRate(a.Currency)
+}
+
+func (a *Assessment) EffectiveCurrency() string {
+	if a.Currency != "" {
+		return a.Currency
+	}
+	return "USD"
 }
 
 type Recommendation struct {
@@ -148,6 +218,8 @@ type AssessmentReport struct {
 	TotalCurrent    float64          `json:"total_current_spend"`
 	TotalProjected  float64          `json:"total_projected_spend"`
 	TotalSavings    float64          `json:"total_monthly_savings"`
+	Currency        string           `json:"currency"`
+	CurrencySymbol  string           `json:"currency_symbol"`
 }
 
 func FindModel(name string) *ModelInfo {

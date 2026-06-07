@@ -68,7 +68,9 @@ func handleAdminSeed(w http.ResponseWriter, r *http.Request) {
 				{"name": "self-hosted", "models": ["llama-3-70b", "mixtral-8x7b"], "monthly_spend": 2000}
 			],
 			"team_composition": {"developers": 20, "platform_engineers": 3, "devops": 2, "management": 2},
-			"source": "manual"
+			"source": "manual",
+			"currency": "USD",
+			"fx_rate": 1.0
 		}`
 
 		var a engine.Assessment
@@ -79,12 +81,12 @@ func handleAdminSeed(w http.ResponseWriter, r *http.Request) {
 
 		err = db.QueryRow(
 			`INSERT INTO assessments (company_name, cloud_vendor, gpu_configs, monthly_request_volume,
-				token_distribution, current_monthly_spend, providers_used, team_composition, source, version)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+				token_distribution, current_monthly_spend, providers_used, team_composition, source, currency, fx_rate, version)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 			RETURNING id`,
 			a.CompanyName, a.CloudVendor, toJSON(a.GPUConfigs), a.MonthlyRequestVolume,
 			toJSON(a.TokenDistribution), a.CurrentMonthlySpend, toJSON(a.ProvidersUsed),
-			toJSON(a.TeamComposition), a.Source, 1,
+			toJSON(a.TeamComposition), a.Source, a.Currency, a.FXRate, 1,
 		).Scan(&aid)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("insert assessment: %v", err), http.StatusInternalServerError)
