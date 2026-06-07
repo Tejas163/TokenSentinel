@@ -226,6 +226,9 @@ function setPeriod(p) {
   loadCharts(p);
 }
 
+/* Currency symbol (set by API response or default to USD) */
+var CURRENCY_SYMBOL = '$';
+
 /* Chart.js color palette */
 var CHART_COLORS = [
   '#38bdf8', '#a78bfa', '#fb923c', '#4ade80', '#f472b6',
@@ -241,6 +244,7 @@ async function loadCharts(period) {
     var r = await fetch('/api/dashboard/cost-timeseries?period=' + period, {headers:{'X-Api-Key':API_KEY}});
     var points = await r.json();
     if (!points || points.length === 0) return;
+    if (points[0].currency_symbol) CURRENCY_SYMBOL = points[0].currency_symbol;
     renderTimeChart(points);
     renderDonutChart(points);
   } catch(e) { console.log('charts load error', e); }
@@ -282,14 +286,14 @@ function renderTimeChart(points) {
         legend: { position: 'bottom', labels: { color: '#94a3b8', boxWidth: 12, padding: 12, font: { size: 11 } } },
         tooltip: {
           callbacks: {
-            label: function(ctx) { return ctx.dataset.label + ': $' + ctx.parsed.y.toFixed(2); }
+            label: function(ctx) { return ctx.dataset.label + ': ' + CURRENCY_SYMBOL + ctx.parsed.y.toFixed(2); }
           }
         }
       },
       scales: {
         x: { ticks: { color: '#64748b', maxTicksLimit: 12, font: { size: 10 } }, grid: { color: '#1e293b' } },
         y: {
-          ticks: { color: '#64748b', font: { size: 10 }, callback: function(v) { return '$' + v.toFixed(2); } },
+          ticks: { color: '#64748b', font: { size: 10 }, callback: function(v) { return CURRENCY_SYMBOL + v.toFixed(2); } },
           grid: { color: '#1e293b' }
         }
       }
@@ -323,7 +327,7 @@ function renderDonutChart(points) {
             label: function(ctx) {
               var total = ctx.dataset.data.reduce(function(a,b) { return a + b; }, 0);
               var pct = ((ctx.parsed / total) * 100).toFixed(1);
-              return ctx.label + ': $' + ctx.parsed.toFixed(2) + ' (' + pct + '%)';
+              return ctx.label + ': ' + CURRENCY_SYMBOL + ctx.parsed.toFixed(2) + ' (' + pct + '%)';
             }
           }
         }

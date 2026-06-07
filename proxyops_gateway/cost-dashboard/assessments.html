@@ -69,7 +69,21 @@
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label>Monthly Spend ($)</label>
+        <label>Currency</label>
+        <select id="currency">
+          <option value="USD">USD ($)</option>
+          <option value="INR">INR (₹)</option>
+          <option value="EUR">EUR (€)</option>
+          <option value="GBP">GBP (£)</option>
+          <option value="JPY">JPY (¥)</option>
+          <option value="CAD">CAD (CA$)</option>
+          <option value="AUD">AUD (A$)</option>
+          <option value="SGD">SGD (S$)</option>
+          <option value="BRL">BRL (R$)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Monthly Spend</label>
         <input type="number" id="monthly-spend" min="0" step="0.01" placeholder="e.g. 18500" required>
       </div>
       <div class="form-group">
@@ -125,6 +139,7 @@ const API_KEY = document.body.getAttribute('data-api-key');
 var providerIdx = 0;
 var gpuIdx = 0;
 var templates = [];
+function currencySymbol(code) { return { USD:'$', INR:'₹', EUR:'€', GBP:'£', JPY:'¥', CAD:'CA$', AUD:'A$', SGD:'S$', BRL:'R$' }[code] || '$'; }
 
 document.addEventListener('DOMContentLoaded', function() {
   loadTemplates();
@@ -147,7 +162,7 @@ async function loadTemplates() {
       return '<div class="template-card" onclick="selectTemplate(' + i + ')" id="tpl-' + i + '">' +
         '<h3>' + t.name + '</h3>' +
         '<p>' + t.description + '</p>' +
-        '<div class="spend">$' + t.assessment.current_monthly_spend.toLocaleString() + '/mo</div>' +
+        '<div class="spend">' + currencySymbol(t.assessment.currency) + t.assessment.current_monthly_spend.toLocaleString() + '/mo</div>' +
         '</div>';
     }).join('');
   } catch (e) {}
@@ -187,6 +202,7 @@ function selectTemplate(idx) {
     updateTokenLabels();
   }
 
+  document.getElementById('currency').value = t.currency || 'USD';
   document.getElementById('source').value = t.source || 'manual';
 }
 
@@ -244,7 +260,7 @@ async function loadAssessments() {
       html += '<tr>' +
         '<td>' + a.id + '</td>' +
         '<td>' + a.company_name + '</td>' +
-        '<td>$' + a.current_monthly_spend.toLocaleString() + '</td>' +
+        '<td>' + currencySymbol(a.currency) + a.current_monthly_spend.toLocaleString() + '</td>' +
         '<td>' + (a.monthly_request_volume || 0).toLocaleString() + '</td>' +
         '<td><span class="status-badge ' + (a.source === 'live' ? 'status-ready' : 'status-pending') + '">' + a.source + '</span></td>' +
         '<td>v' + a.version + '</td>' +
@@ -317,7 +333,8 @@ async function submitAssessment(e) {
       devops: parseInt(document.getElementById('team-devops').value) || 0,
       management: parseInt(document.getElementById('team-mgmt').value) || 0
     },
-    source: document.getElementById('source').value
+    source: document.getElementById('source').value,
+    currency: document.getElementById('currency').value
   };
 
   try {

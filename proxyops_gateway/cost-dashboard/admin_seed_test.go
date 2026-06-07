@@ -124,7 +124,7 @@ func TestHandleAdminSeed_newAssessment(t *testing.T) {
 		WillReturnError(fmt.Errorf("not found"))
 
 	mock.ExpectQuery("INSERT INTO assessments").
-		WithArgs("DemoCorp", "aws", sqlmock.AnyArg(), 1000000, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), "manual", 1).
+		WithArgs("DemoCorp", "aws", sqlmock.AnyArg(), 1000000, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), "manual", "USD", 1.0, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(99))
 
 	appStore = engine.NewMemStore()

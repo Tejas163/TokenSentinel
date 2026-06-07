@@ -196,13 +196,15 @@ type AnomalyEntry struct {
 }
 
 type ModelCost struct {
-	Model        string  `json:"model"`
-	TotalTokens  int     `json:"total_tokens"`
-	TotalInput   int     `json:"total_input"`
-	TotalOutput  int     `json:"total_output"`
-	RequestCount int     `json:"request_count"`
-	AvgInput     float64 `json:"avg_input"`
-	AvgOutput    float64 `json:"avg_output"`
+	Model          string  `json:"model"`
+	TotalTokens    int     `json:"total_tokens"`
+	TotalInput     int     `json:"total_input"`
+	TotalOutput    int     `json:"total_output"`
+	RequestCount   int     `json:"request_count"`
+	AvgInput       float64 `json:"avg_input"`
+	AvgOutput      float64 `json:"avg_output"`
+	Currency       string  `json:"currency"`
+	CurrencySymbol string  `json:"currency_symbol"`
 }
 
 func main() {
@@ -979,6 +981,11 @@ func handleCosts(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	for i := range results {
+		results[i].Currency = "USD"
+		results[i].CurrencySymbol = "$"
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(results)
 }
@@ -998,14 +1005,18 @@ func handleSummary(w http.ResponseWriter, r *http.Request) {
 	orgID := getOrgID(r)
 
 	var summary struct {
-		TotalRequests int     `json:"total_requests"`
-		TotalTokens   int     `json:"total_tokens"`
-		TotalInput    int     `json:"total_input"`
-		TotalOutput   int     `json:"total_output"`
-		UniqueModels  int     `json:"unique_models"`
-		Period        string  `json:"period"`
-		AvgTokensPer  float64 `json:"avg_tokens_per_request"`
+		TotalRequests  int     `json:"total_requests"`
+		TotalTokens    int     `json:"total_tokens"`
+		TotalInput     int     `json:"total_input"`
+		TotalOutput    int     `json:"total_output"`
+		UniqueModels   int     `json:"unique_models"`
+		Period         string  `json:"period"`
+		AvgTokensPer   float64 `json:"avg_tokens_per_request"`
+		Currency       string  `json:"currency"`
+		CurrencySymbol string  `json:"currency_symbol"`
 	}
+	summary.Currency = "USD"
+	summary.CurrencySymbol = "$"
 	summary.Period = period
 
 	var row *sql.Row
@@ -1041,10 +1052,12 @@ func handleSummary(w http.ResponseWriter, r *http.Request) {
 
 // costTimePoint represents one data point in the cost time-series.
 type costTimePoint struct {
-	Hour   string  `json:"hour"`
-	Model  string  `json:"model"`
-	Cost   float64 `json:"cost"`
-	Tokens int64   `json:"tokens"`
+	Hour           string  `json:"hour"`
+	Model          string  `json:"model"`
+	Cost           float64 `json:"cost"`
+	Tokens         int64   `json:"tokens"`
+	Currency       string  `json:"currency"`
+	CurrencySymbol string  `json:"currency_symbol"`
 }
 
 func handleCostTimeSeries(w http.ResponseWriter, r *http.Request) {
@@ -1087,12 +1100,14 @@ func handleCostTimeSeries(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		price := modelPrice(model)
-		cost := (float64(totalInput)/1000)*price.Input + (float64(totalOutput)/1000)*price.Output
+		cost := (float64(totalInput)/1_000_000)*price.Input + (float64(totalOutput)/1_000_000)*price.Output
 		points = append(points, costTimePoint{
-			Hour:   hour.Format(time.RFC3339),
-			Model:  model,
-			Cost:   math.Round(cost*100) / 100,
-			Tokens: totalTokens,
+			Hour:           hour.Format(time.RFC3339),
+			Model:          model,
+			Cost:           math.Round(cost*100) / 100,
+			Tokens:         totalTokens,
+			Currency:       "USD",
+			CurrencySymbol: "$",
 		})
 	}
 
