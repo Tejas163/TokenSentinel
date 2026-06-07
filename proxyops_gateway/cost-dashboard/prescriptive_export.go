@@ -12,11 +12,14 @@ import (
 	"github.com/johnfercher/maroto/v2/pkg/components/col"
 	"github.com/johnfercher/maroto/v2/pkg/components/row"
 	"github.com/johnfercher/maroto/v2/pkg/components/text"
+	"github.com/johnfercher/maroto/v2/pkg/config"
 	"github.com/johnfercher/maroto/v2/pkg/consts/align"
 	"github.com/johnfercher/maroto/v2/pkg/consts/fontstyle"
 	"github.com/johnfercher/maroto/v2/pkg/props"
 	"github.com/proxyops/internal/engine"
 )
+
+
 
 func handleReportDownload(w http.ResponseWriter, r *http.Request, id int, format string) {
 	switch format {
@@ -110,7 +113,10 @@ func exportPDF(w http.ResponseWriter, assessmentID int) {
 }
 
 func generatePDF(w http.ResponseWriter, report *engine.AssessmentReport) {
-	m := maroto.New()
+	m := maroto.New(config.NewBuilder().
+		WithLeftMargin(15).
+		WithRightMargin(15).
+		Build())
 
 	m.AddRow(20).Add(text.NewCol(12, "TokenSentinel Prescriptive Assessment Report", props.Text{
 		Style: fontstyle.Bold,
@@ -182,21 +188,21 @@ func generatePDF(w http.ResponseWriter, report *engine.AssessmentReport) {
 
 		m.AddRows(row.New(10).Add(
 			col.New(3).Add(text.New("Model", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Left})),
-			col.New(2).Add(text.New("Provider", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Left})),
-			col.New(3).Add(text.New("Input (M)", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Right})),
-			col.New(2).Add(text.New("Output (M)", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Right})),
-			col.New(1).Add(text.New("Cur/Mo", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Right})),
-			col.New(1).Add(text.New("Proj/Mo", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Right})),
+			col.New(3).Add(text.New("Provider", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Left})),
+			col.New(2).Add(text.New("Input (M)", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Right, Right: 3})),
+			col.New(2).Add(text.New("Output (M)", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Right, Right: 3})),
+			col.New(1).Add(text.New("Cur/Mo", props.Text{Style: fontstyle.Bold, Size: 7, Align: align.Right, Right: 2})),
+			col.New(1).Add(text.New("Proj", props.Text{Style: fontstyle.Bold, Size: 7, Align: align.Right, Right: 2})),
 		))
 
 		for _, cp := range report.CostBreakdown {
 			m.AddRows(row.New(8).Add(
 				col.New(3).Add(text.New(cp.Model, props.Text{Size: 8, Align: align.Left})),
-				col.New(2).Add(text.New(cp.Provider, props.Text{Size: 8, Align: align.Left})),
-				col.New(3).Add(text.New(fmt.Sprintf("%.2f", cp.InputTokensMillions), props.Text{Size: 8, Align: align.Right})),
-				col.New(2).Add(text.New(fmt.Sprintf("%.2f", cp.OutputTokensMillions), props.Text{Size: 8, Align: align.Right})),
-				col.New(1).Add(text.New(fmt.Sprintf("$%.0f", cp.CurrentMonthlyCost), props.Text{Size: 8, Align: align.Right})),
-				col.New(1).Add(text.New(fmt.Sprintf("$%.0f", cp.ProjectedMonthlyCost), props.Text{Size: 8, Align: align.Right})),
+				col.New(3).Add(text.New(cp.Provider, props.Text{Size: 8, Align: align.Left})),
+				col.New(2).Add(text.New(fmt.Sprintf("%.2f", cp.InputTokensMillions), props.Text{Size: 8, Align: align.Right, Right: 3})),
+				col.New(2).Add(text.New(fmt.Sprintf("%.2f", cp.OutputTokensMillions), props.Text{Size: 8, Align: align.Right, Right: 3})),
+				col.New(1).Add(text.New(fmt.Sprintf("$%.0f", cp.CurrentMonthlyCost), props.Text{Size: 7, Align: align.Right, Right: 2})),
+				col.New(1).Add(text.New(fmt.Sprintf("$%.0f", cp.ProjectedMonthlyCost), props.Text{Size: 7, Align: align.Right, Right: 2})),
 			))
 		}
 		m.AddRow(10).Add(text.NewCol(12, "", props.Text{}))
