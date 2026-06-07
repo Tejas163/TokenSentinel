@@ -41,30 +41,48 @@
       <p>The cost dashboard is the primary interface for monitoring AI spend. It is accessible at <code>http://localhost:3001</code>.</p>
 
       <h3>Summary Cards</h3>
-      <p>The dashboard header displays four summary metrics for the selected period:</p>
+      <p>The dashboard header displays six summary metrics for the selected period:</p>
       <ul>
-        <li><strong>Total Cost</strong> — aggregate spend across all models</li>
-        <li><strong>Total Requests</strong> — number of proxied requests</li>
+        <li><strong>Requests</strong> — number of proxied requests</li>
         <li><strong>Total Tokens</strong> — sum of input + output tokens</li>
+        <li><strong>Input Tokens</strong> — prompt tokens consumed</li>
+        <li><strong>Output Tokens</strong> — completion tokens generated</li>
+        <li><strong>Models Used</strong> — count of distinct models in the period</li>
         <li><strong>Avg Tokens/Req</strong> — average token consumption per request</li>
       </ul>
 
       <h3>Time Period Selection</h3>
       <p>Toggle between predefined periods: <strong>1H</strong>, <strong>6H</strong>, <strong>24H</strong>, <strong>3D</strong>, <strong>7D</strong>. The dashboard reloads data on selection change.</p>
 
-      <h3>Cost by Model</h3>
-      <p>A detailed table shows cost broken down per model, with columns for requests, total tokens, and percentage of total spend.</p>
+      <h3>Charts</h3>
+      <p>The dashboard includes two interactive charts powered by Chart.js:</p>
+      <ul>
+        <li><strong>Cost Over Time</strong> — stacked line chart showing cost per model across hourly buckets. Hover to see exact dollar amounts per model at each time slice.</li>
+        <li><strong>Cost by Model</strong> — doughnut chart showing the proportional cost distribution across models. Hover to see the percentage and dollar amount for each model.</li>
+      </ul>
+      <p>Both charts refresh automatically when the period changes, when new SSE cost events arrive, or after seeding demo data.</p>
+
+      <h3>Cost by Model Table</h3>
+      <p>A detailed table shows cost broken down per model, with columns for requests, input tokens, output tokens, total tokens, avg input, and avg output.</p>
 
       <h3>Live Events (SSE)</h3>
       <p>When the page is open, a green badge indicates an active SSE connection. New cost events and anomaly alerts stream in real time without page refreshes. A red badge indicates a disconnected state with automatic reconnection.</p>
+
+      <h3>Onboarding Wizard</h3>
+      <p>On first load with no data, the dashboard shows a guided onboarding wizard with three steps:</p>
+      <ul>
+        <li><strong>Seed Demo Data</strong> — populate the dashboard with 7 days of realistic cost data across 7 models and 4 teams</li>
+        <li><strong>Explore the Dashboard</strong> — use the period selector and watch for SSE events</li>
+        <li><strong>Run an Assessment</strong> — navigate to the prescriptive engine for cost-saving recommendations</li>
+      </ul>
 
       <h3>Anomaly Detection</h3>
       <p>TokenSentinel detects cost anomalies using a <strong>3-sigma sliding window</strong> algorithm:</p>
       <ul>
         <li>Computed per-model over recent time windows</li>
-        <li>Checked every 5 minutes</li>
+        <li>Checked every 5 minutes (configurable via <code>ANOMALY_INTERVAL</code>)</li>
         <li>Anomalies are broadcast via SSE to the dashboard</li>
-        <li>Available via REST: <code>GET /api/admin/anomalies?limit=10</code></li>
+        <li>Available via REST: <code>GET /api/dashboard/anomalies?limit=10</code></li>
       </ul>
 
       <div class="info-box">
@@ -73,12 +91,148 @@
       </div>
 
       <h2 id="headers">Response Headers</h2>
-      <p>Every proxied LLM response includes two custom headers for cost tracking:</p>
+      <p>Every proxied LLM response includes custom headers for cost tracking and routing visibility:</p>
       <table>
         <tr><th>Header</th><th>Example</th><th>Description</th></tr>
         <tr><td><code>X-Model-Used</code></td><td><code>gpt-4o-mini</code></td><td>The upstream model that handled the request</td></tr>
         <tr><td><code>X-Cost-Cents</code></td><td><code>0.042</code></td><td>Cost of the request in USD cents</td></tr>
+        <tr><td><code>X-Cache</code></td><td><code>HIT</code> / <code>MISS</code></td><td>Whether the response was served from semantic cache</td></tr>
+        <tr><td><code>X-Cache-Savings-Cents</code></td><td><code>0.021</code></td><td>Cost saved by serving from cache instead of the upstream provider</td></tr>
+        <tr><td><code>X-Cost-Routing</code></td><td><code>fallback</code></td><td>Present only when a fallback provider handled the request (not the primary target)</td></tr>
       </table>
+
+      <h3>Error Response Format</h3>
+      <p>All error responses use a structured JSON format:</p>
+      <pre><code>{
+  "error": "input of 50000 tokens exceeds model gpt-4 limit of 8192 tokens",
+  "request_id": "gen-1717718400000000000",
+  "error_code": "rate_limited"
+}</code></pre>
+      <p><code>request_id</code> is always included when available. <code>error_code</code> is included for rate limiting (<code>"rate_limited"</code>) and other machine-classifiable errors.</p>
+
+      <h2 id="rate-limiting">Rate Limiting</h2>
+      <p>The go-router includes a per-client rate limiter using an in-memory token bucket:</p>
+      <ul>
+        <li>Clients are identified by <code>X-Api-Key</code> header, falling back to <code>RemoteAddr</code></li>
+        <li>Default capacity: <strong>60 tokens</strong> (max burst)</li>
+        <li>Default refill rate: <strong>60 tokens/second</strong></li>
+        <li>Exceeding the limit returns <code>429 Too Many Requests</code> with <code>Retry-After: 1</code> header</li>
+        <li>Configuration: <code>RATE_LIMIT_CAPACITY</code> and <code>RATE_LIMIT_REFILL</code> env vars</li>
+      </ul>
+
+      <h2 id="model-limits">Per-Model Context Window Limits</h2>
+      <p>TokenSentinel enforces per-model context window limits, rejecting requests that exceed the model's maximum input token capacity:</p>
+      <table>
+        <tr><th>Model</th><th>Max Input Tokens</th><th>Max Output Tokens</th></tr>
+        <tr><td>gpt-4o</td><td>128,000</td><td>16,384</td></tr>
+        <tr><td>gpt-4</td><td>8,192</td><td>8,192</td></tr>
+        <tr><td>gpt-4o-mini</td><td>128,000</td><td>16,384</td></tr>
+        <tr><td>claude-3-opus</td><td>200,000</td><td>4,096</td></tr>
+        <tr><td>claude-3.5-sonnet</td><td>200,000</td><td>8,192</td></tr>
+        <tr><td>llama-3-70b</td><td>8,192</td><td>4,096</td></tr>
+        <tr><td>gemini-1.5-pro</td><td>2,097,152</td><td>8,192</td></tr>
+      </table>
+      <p>When a request exceeds the limit, the gateway returns <code>400 Bad Request</code> with a descriptive message showing the input token count, model name, and limit. These limits can be overridden globally via <code>MODEL_MAX_INPUT_TOKENS</code> and <code>MODEL_MAX_OUTPUT_TOKENS</code> environment variables.</p>
+
+      <div class="info-box warning">
+        <strong>Note</strong>
+        Token estimation uses the <code>tiktoken</code> library for OpenAI models and character-based estimation for others. These are estimates, not exact counts from the upstream provider.
+      </div>
+
+      <h2 id="semantic-cache">Semantic Caching</h2>
+      <p>TokenSentinel includes a semantic caching system that avoids re-prompting identical or semantically similar requests. Two backend modes are available:</p>
+
+      <h3>MinHash LSH (default)</h3>
+      <p>A pure-Go implementation that works with any Redis instance (<code>redis:7-alpine</code>):</p>
+      <ul>
+        <li>Tokenizes prompts into trigrams</li>
+        <li>Computes a 64-hash FNV-1a MinHash signature (~33µs per prompt)</li>
+        <li>Uses 16×4 LSH banding for approximate nearest neighbor search</li>
+        <li>Stores signatures in Redis with configurable TTL</li>
+        <li>Similarity threshold: configurable via <code>SEMANTIC_CACHE_THRESHOLD</code> (default 0.85)</li>
+      </ul>
+
+      <h3>Vector Embeddings</h3>
+      <p>Uses an embedding API (OpenAI-compatible) for higher accuracy on rephrased prompts:</p>
+      <ul>
+        <li>Calls a configurable embedding API (<code>EMBEDDING_API_URL</code>)</li>
+        <li>Stores vectors via RediSearch <code>FT.CREATE</code> + <code>FT.SEARCH</code> with COSINE distance</li>
+        <li>Caches embeddings in Redis (24h TTL)</li>
+        <li>Requires <code>redis-stack-server</code> (includes RediSearch module)</li>
+        <li>Configuration: <code>EMBEDDING_API_URL</code>, <code>EMBEDDING_MODEL</code>, <code>EMBEDDING_DIM</code></li>
+      </ul>
+
+      <div class="info-box success">
+        <strong>Benchmark</strong>
+        MinHash: 33µs per signature, catches exact+shallow rephrases at 0.85+ threshold. Embedding: 1.09ms per call (including API latency), catches 3/5 rephrased variants. For best results in production, use embedding mode with a local model (e.g., LM Studio on localhost).
+      </div>
+
+      <h4>Configuration</h4>
+      <table>
+        <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+        <tr><td><code>SEMANTIC_CACHE_ENABLED</code></td><td><code>false</code></td><td>Set to <code>true</code> or <code>1</code> to enable</td></tr>
+        <tr><td><code>SEMANTIC_CACHE_MODE</code></td><td><code>minhash</code></td><td><code>minhash</code> or <code>embedding</code></td></tr>
+        <tr><td><code>SEMANTIC_CACHE_THRESHOLD</code></td><td><code>0.85</code></td><td>Similarity threshold (0.0–1.0)</td></tr>
+        <tr><td><code>SEMANTIC_CACHE_TTL</code></td><td><code>1h</code></td><td>Cache TTL (Go duration)</td></tr>
+        <tr><td><code>EMBEDDING_API_URL</code></td><td><code>https://api.openai.com/v1/embeddings</code></td><td>Embedding API endpoint</td></tr>
+        <tr><td><code>EMBEDDING_MODEL</code></td><td><code>text-embedding-ada-002</code></td><td>Embedding model name</td></tr>
+        <tr><td><code>EMBEDDING_DIM</code></td><td><code>1536</code></td><td>Embedding vector dimension</td></tr>
+      </table>
+
+      <h3>Cache Headers</h3>
+      <p>When semantic cache is enabled, responses include cache headers:</p>
+      <ul>
+        <li><code>X-Cache: HIT</code> — response was served from cache (zero upstream cost)</li>
+        <li><code>X-Cache: MISS</code> — response was fetched from upstream</li>
+        <li><code>X-Cache-Savings-Cents</code> — the dollar amount saved by the cache hit</li>
+      </ul>
+
+      <h2 id="routing">Routing Configuration</h2>
+      <p>Routes are stored in Redis as JSON under <code>routes:{path}</code>. Each route defines providers with weights, models, and timeouts:</p>
+      <pre><code>{
+  "pattern": "/v1/chat/completions",
+  "providers": [
+    {
+      "url": "https://api.openai.com/v1/chat/completions",
+      "model": "gpt-4o",
+      "weight": 3,
+      "timeout": 30
+    },
+    {
+      "url": "https://api.anthropic.com/v1/messages",
+      "model": "claude-3-sonnet",
+      "weight": 1,
+      "timeout": 30
+    }
+  ],
+  "auto_model": false
+}</code></pre>
+
+      <h3>Setting a Route</h3>
+      <pre><code>docker compose exec redis redis-cli SET "routes:/v1/chat/completions" \
+  '{"pattern":"/v1/chat/completions","providers":[{"url":"https://api.openai.com/v1/chat/completions","model":"gpt-4o","weight":3,"timeout":30}],"auto_model":false}'</code></pre>
+
+      <h2 id="adaptive-routing">Adaptive Routing</h2>
+      <p>TokenSentinel dynamically adjusts provider selection weights based on historical success and error rates:</p>
+      <ul>
+        <li>Each provider's error rate is tracked via <code>recordProviderSuccess</code> and <code>recordProviderFailure</code></li>
+        <li>Dynamic weight = <code>baseWeight × (1 − errorRate)</code>, with a floor of 5% of the original weight</li>
+        <li>Weights are recomputed on every selection</li>
+        <li>At debug log level, weight changes are logged (e.g., <code>gpt-4@url: 3→2 (err 33.3%)</code>)</li>
+      </ul>
+      <p>This means a provider that starts failing gets gradually deprioritized. The weight floor ensures it still gets occasional test traffic so it can recover.</p>
+
+      <h2 id="fallback-routing">Fallback Routing</h2>
+      <p>When the primary provider fails, TokenSentinel uses a multi-provider fallback chain:</p>
+      <ol>
+        <li><strong>Primary target</strong> — the originally selected provider</li>
+        <li><strong>Equivalence group</strong> — providers serving equivalent models (e.g., <code>gpt-4</code> fallbacks to <code>claude-3-sonnet</code>, <code>gpt-4o-mini</code>, <code>gpt-3.5-turbo</code>)</li>
+        <li><strong>Cheapest remaining</strong> — all remaining providers sorted by cost</li>
+      </ol>
+      <p>Providers with open circuit breakers are skipped. When a fallback provider handles the request, the response includes <code>X-Cost-Routing: fallback</code>. The model equivalence map is defined in <code>fallback_router.go</code> and covers all major providers.</p>
+
+      <h3>Circuit Breaker</h3>
+      <p>Each upstream provider has a circuit breaker that opens after <strong>5 consecutive failures</strong>, with a <strong>30-second cooldown</strong> before attempting half-open probes. This prevents cascading failures to unhealthy providers.</p>
 
       <h2 id="budgets">Per-Team Budgets</h2>
       <p>TokenSentinel supports per-team budget management for cost allocation across departments or projects.</p>
@@ -114,51 +268,91 @@
       <table>
         <tr><th>Variable</th><th>Description</th></tr>
         <tr><td><code>DIGEST_WEBHOOK_URL</code></td><td>Slack or Teams incoming webhook URL</td></tr>
-        <tr><td><code>DIGEST_SCHEDULE</code></td><td>Cron expression (e.g., <code>0 9 * * 1</code> for Monday 9 AM)</td></tr>
+        <tr><td><code>DIGEST_SCHEDULE</code></td><td>Interval between digests (e.g., <code>24h</code>)</td></tr>
       </table>
       <p>Digests include a per-model cost breakdown formatted as Slack message attachments.</p>
+
+      <h2 id="monitoring">Monitoring & Alerts</h2>
+      <p>The cost dashboard includes a background monitoring engine that tracks spend trends and generates alerts:</p>
+      <ul>
+        <li><strong>Spend trend monitoring</strong> — detects spikes or drops per model (every <code>MONITORING_INTERVAL</code>, default 5m)</li>
+        <li><strong>Anomaly detection</strong> — 3-sigma z-score vs trailing window (every <code>ANOMALY_INTERVAL</code>, default 5m)</li>
+        <li><strong>Savings tracking</strong> — records cost savings events from semantic cache hits</li>
+        <li><strong>Alerting</strong> — email via SMTP, webhook (Slack/Teams), and SSE events to the dashboard</li>
+        <li><strong>Data retention</strong> — automatic pruning after <code>RETENTION_MAX_DAYS</code> (default 90)</li>
+      </ul>
+
+      <h3>Alert Severity Levels</h3>
+      <p>Alerts are classified into three severities:</p>
+      <ul>
+        <li><strong>critical</strong> — red, urgent attention required (e.g., spend spike &gt; 5x)</li>
+        <li><strong>warning</strong> — yellow, moderate concern (e.g., spend spike &gt; 2x)</li>
+        <li><strong>info</strong> — blue, informational (e.g., savings milestone reached)</li>
+      </ul>
 
       <h2 id="auth">Authentication</h2>
       <p>TokenSentinel uses a shared API key for service-to-service authentication:</p>
       <ul>
-        <li><strong>Client → Rust proxy:</strong> HTTP <code>Authorization: Bearer &lt;key&gt;</code> header</li>
-        <li><strong>Rust proxy → Go router:</strong> <code>X-Authenticated-User</code> header set by Rust after key validation</li>
-        <li><strong>Dashboard/admin API:</strong> Same <code>Authorization: Bearer &lt;key&gt;</code> pattern</li>
-        <li><strong>Dashboard HTML page:</strong> Exempt from auth — accessible in any browser</li>
+        <li><strong>Client → Go Router:</strong> <code>X-Api-Key</code> header or <code>Authorization: Bearer &lt;key&gt;</code></li>
+        <li><strong>Dashboard/admin API:</strong> Same <code>X-Api-Key</code> or <code>Authorization: Bearer</code> pattern</li>
+        <li><strong>Dashboard HTML page:</strong> <code>data-api-key</code> attribute on <code>&lt;body&gt;</code>, used for AJAX calls</li>
+        <li><strong>Rust Proxy → Go Router:</strong> Forwards the API key from the client</li>
       </ul>
-      <p>Set the shared key via <code>AUTH_API_KEY</code> environment variable (default: <code>dev-key-123</code>).</p>
-
-      <h2 id="routing">Routing Configuration</h2>
-      <p>Routes are stored in Redis as JSON under <code>routes:{pattern}</code>. Each route defines:</p>
-      <pre><code>{
-  "pattern": "/v1/chat/completions",
-  "providers": [
-    {
-      "name": "openai",
-      "base_url": "https://api.openai.com",
-      "api_key": "${OPENAI_API_KEY}",
-      "weight": 3
-    },
-    {
-      "name": "anthropic",
-      "base_url": "https://api.anthropic.com",
-      "weight": 1
-    }
-  ]
-}</code></pre>
-      <p>The <strong>weight</strong> field controls traffic distribution. A provider with weight 3 gets 3x the traffic of a provider with weight 1.</p>
+      <p>Set the shared key via <code>AUTH_API_KEY</code> environment variable. When empty, auth is disabled in development.</p>
 
       <h2 id="model-tiers">Autonomous Model Tiers</h2>
-      <p>TokenSentinel supports automatic model selection based on prompt length:</p>
+      <p>TokenSentinel supports automatic model selection based on prompt length when <code>auto_model: true</code> is set on a route:</p>
       <table>
         <tr><th>Tier</th><th>Prompt Length</th><th>Example Models</th></tr>
-        <tr><td>Cheap</td><td>&lt; 100 tokens</td><td>gpt-4o-mini, claude-3-haiku</td></tr>
-        <tr><td>Medium</td><td>100–500 tokens</td><td>gpt-4o, claude-3-sonnet</td></tr>
-        <tr><td>Capable</td><td>&gt; 500 tokens</td><td>gpt-4-turbo, claude-3-opus</td></tr>
+        <tr><td>Cheap</td><td>&lt; 500 bytes</td><td>gpt-4o-mini, claude-3-haiku</td></tr>
+        <tr><td>Medium</td><td>500–2000 bytes</td><td>gpt-4o, claude-3-sonnet</td></tr>
+        <tr><td>Capable</td><td>&gt; 2000 bytes</td><td>claude-3.5-sonnet, gemini-1.5-pro</td></tr>
       </table>
 
+      <h2 id="api-playground">API Playground</h2>
+      <p>The dashboard includes a built-in API playground for testing cost ingestion without real LLM traffic:</p>
+      <ul>
+        <li>Select a model, enter input/output token counts, and see estimated cost</li>
+        <li>Send simulated requests that flow through the same cost pipeline as production traffic</li>
+        <li>Results appear in the dashboard in real time via SSE</li>
+      </ul>
+
+      <h2 id="prescriptive-engine">Prescriptive Engine</h2>
+      <p>TokenSentinel includes a prescriptive cost optimization engine accessible via the <strong>Assessments</strong> page (<code>/assessments</code>):</p>
+      <ul>
+        <li><strong>Cost Assessment</strong> — full analysis with model substitution, GPU tier, and provider recommendations</li>
+        <li><strong>What-If Simulation</strong> — adjust volume, model mix, or provider to see cost impact</li>
+        <li><strong>Multi-Scenario Comparison</strong> — compare up to 5 scenarios side-by-side</li>
+        <li><strong>Reports</strong> — exportable as HTML, CSV, or PDF</li>
+        <li><strong>Starter Templates</strong> — pre-configured templates for startup, mid-size, and enterprise deployments</li>
+      </ul>
+
+      <h2 id="mcp">MCP Gateway</h2>
+      <p>The MCP gateway (port 3010) exposes 11 cost-management tools via the Model Context Protocol:</p>
+      <ul>
+        <li><strong>Cost queries</strong> — <code>get_cost_summary</code>, <code>get_model_costs</code>, <code>get_anomalies</code></li>
+        <li><strong>Assessments</strong> — <code>run_assessment</code>, <code>run_whatif</code>, <code>whatif_multi_scenario</code>, <code>whatif_volume_shift</code>, <code>whatif_model_switch</code></li>
+        <li><strong>Budgets</strong> — <code>get_budget_status</code>, <code>list_budget_rules</code></li>
+        <li><strong>Reports</strong> — <code>get_report</code></li>
+      </ul>
+      <p>MCP uses SSE (<code>GET /mcp</code>) for streaming sessions and JSON-RPC (<code>POST /mcp</code>) for tool calls. Team data scoping via <code>AGENT_TEAM_MAP</code> ensures users only see their team's costs. Budget enforcement blocks tool calls for teams that have exceeded their budget.</p>
+
       <h2 id="data-retention">Data Retention</h2>
-      <p>Cost history entries are automatically pruned after <strong>90 days</strong> (configurable). The pruning runs periodically on the cost dashboard service.</p>
+      <p>Cost history entries are automatically pruned after <strong>90 days</strong> (configurable via <code>RETENTION_MAX_DAYS</code>). The pruning runs periodically on the cost dashboard service.</p>
+
+      <h2 id="env-vars">Key Environment Variables</h2>
+      <table>
+        <tr><th>Variable</th><th>Service</th><th>Default</th><th>Description</th></tr>
+        <tr><td><code>AUTH_API_KEY</code></td><td>go-router, cost-dashboard</td><td>(disabled)</td><td>API key for gateway auth</td></tr>
+        <tr><td><code>REDIS_ADDR</code></td><td>go-router, cost-dashboard</td><td><code>localhost:6379</code></td><td>Redis address</td></tr>
+        <tr><td><code>DATABASE_URL</code></td><td>cost-dashboard</td><td><code>postgres://localhost:5432/...</code></td><td>PostgreSQL DSN</td></tr>
+        <tr><td><code>SEMANTIC_CACHE_ENABLED</code></td><td>go-router</td><td><code>false</code></td><td>Enable semantic caching</td></tr>
+        <tr><td><code>RATE_LIMIT_CAPACITY</code></td><td>go-router</td><td><code>60</code></td><td>Token bucket burst size</td></tr>
+        <tr><td><code>ANOMALY_Z_SCORE</code></td><td>cost-dashboard</td><td><code>3.0</code></td><td>Anomaly threshold</td></tr>
+        <tr><td><code>SMTP_HOST</code></td><td>cost-dashboard</td><td>(disabled)</td><td>SMTP server for alert emails</td></tr>
+        <tr><td><code>DIGEST_WEBHOOK_URL</code></td><td>cost-dashboard</td><td>(disabled)</td><td>Slack/Teams webhook for digests</td></tr>
+      </table>
+      <p>See the full reference at the <a href="https://github.com/Tejas163/TokenSentinel?tab=readme-ov-file#environment-variables">project README</a>.</p>
     </div>
   </main>
 </body>
