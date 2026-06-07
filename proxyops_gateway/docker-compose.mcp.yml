@@ -1,0 +1,54 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: cost_dashboard
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d cost_dashboard"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - mcp-pg-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  cost-dashboard:
+    build: ./cost-dashboard
+    ports:
+      - "3001:3001"
+    depends_on:
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    environment:
+      - REDIS_ADDR=redis:6379
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/cost_dashboard?sslmode=disable
+      - AUTH_API_KEY=change-me
+    restart: unless-stopped
+
+  mcp-server:
+    build: ./mcp-gateway
+    ports:
+      - "3010:3010"
+    depends_on:
+      - cost-dashboard
+    environment:
+      - MCP_API_KEY=change-me
+      - DASHBOARD_URL=http://cost-dashboard:3001
+      - DASHBOARD_API_KEY=change-me
+      - REDIS_URL=redis://redis:6379
+    restart: unless-stopped
+
+volumes:
+  mcp-pg-data:

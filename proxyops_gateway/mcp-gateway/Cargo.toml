@@ -2,6 +2,15 @@
 name = "mcp-gateway"
 version = "0.1.0"
 edition = "2024"
+description = "TokenSentinel MCP Server — 11 tools for LLM cost observability, model routing, budget enforcement, and prescriptive cost optimization. MCP HTTP transport (SSE + POST/message)."
+keywords = ["mcp", "llm", "cost", "observability", "model-router", "budget", "prescriptive"]
+categories = ["web-programming", "development-tools", "ai"]
+authors = ["TokenSentinel"]
+license = "MIT"
+homepage = "https://github.com/Tejas163/TokenSentinel"
+repository = "https://github.com/Tejas163/TokenSentinel"
+readme = "README.md"
+documentation = "https://github.com/Tejas163/TokenSentinel/blob/main/proxyops_gateway/mcp-gateway/README.md"
 
 [dependencies]
 axum = "0.8"

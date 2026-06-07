@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TokenSentinel Cost Dashboard</title>
 <link rel="stylesheet" href="/static/styles.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <style>
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
   .stat { background: #1e293b; border-radius: 8px; padding: 1.25rem; border: 1px solid #334155; }
@@ -59,6 +60,12 @@
   .wizard-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #334155; }
   .wizard-actions button { background: transparent; border: 1px solid #475569; color: #94a3b8; padding: 0.4rem 1rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
   .wizard-actions button:hover { background: #334155; color: #f8fafc; }
+.chart-row { display: flex; gap: 1.5rem; }
+.chart-container { flex: 1; min-width: 0; }
+.chart-container h2 { margin-bottom: 0.75rem; }
+.chart-container canvas { max-height: 280px; max-width: 100%; }
+.chart-donut { flex: 0 0 320px; }
+@media (max-width: 800px) { .chart-row { flex-direction: column; } .chart-donut { flex: 1; } }
 </style>
 </head>
 <body data-api-key="{{index . "APIKey"}}">
@@ -89,6 +96,17 @@
     <button onclick="setPeriod('168h')">7D</button>
   </div>
   <div class="stats" id="summary"></div>
+</div>
+
+<div class="card chart-row">
+  <div class="chart-container">
+    <h2>Cost Over Time</h2>
+    <canvas id="costTimeChart"></canvas>
+  </div>
+  <div class="chart-container chart-donut">
+    <h2>Cost by Model</h2>
+    <canvas id="modelDonutChart"></canvas>
+  </div>
 </div>
 
 <div class="card">
@@ -205,10 +223,118 @@ function setPeriod(p) {
   });
   loadSummary(p);
   loadCosts(p);
+  loadCharts(p);
+}
+
+/* Chart.js color palette */
+var CHART_COLORS = [
+  '#38bdf8', '#a78bfa', '#fb923c', '#4ade80', '#f472b6',
+  '#facc15', '#2dd4bf', '#f87171', '#818cf8', '#34d399',
+  '#e879f9', '#fbbf24', '#22d3ee', '#a3e635', '#c084fc'
+];
+
+var costTimeChart = null;
+var modelDonutChart = null;
+
+async function loadCharts(period) {
+  try {
+    var r = await fetch('/api/dashboard/cost-timeseries?period=' + period, {headers:{'X-Api-Key':API_KEY}});
+    var points = await r.json();
+    if (!points || points.length === 0) return;
+    renderTimeChart(points);
+    renderDonutChart(points);
+  } catch(e) { console.log('charts load error', e); }
+}
+
+function renderTimeChart(points) {
+  var labels = [...new Set(points.map(function(p) { return p.hour; }))].sort();
+  var models = [...new Set(points.map(function(p) { return p.model; }))];
+  var modelData = {};
+  points.forEach(function(p) {
+    if (!modelData[p.model]) modelData[p.model] = {};
+    modelData[p.model][p.hour] = p.cost;
+  });
+  var datasets = models.map(function(m, i) {
+    return {
+      label: m,
+      data: labels.map(function(l) { return modelData[m] && modelData[m][l] ? modelData[m][l] : 0; }),
+      borderColor: CHART_COLORS[i % CHART_COLORS.length],
+      backgroundColor: CHART_COLORS[i % CHART_COLORS.length] + '20',
+      fill: true,
+      tension: 0.3,
+      pointRadius: 2,
+    };
+  });
+  var timeLabels = labels.map(function(l) {
+    var d = new Date(l);
+    return d.getHours() + ':' + String(d.getMinutes()).padStart(2,'0');
+  });
+  if (costTimeChart) { costTimeChart.destroy(); }
+  var ctx = document.getElementById('costTimeChart').getContext('2d');
+  costTimeChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels: timeLabels, datasets: datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#94a3b8', boxWidth: 12, padding: 12, font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) { return ctx.dataset.label + ': $' + ctx.parsed.y.toFixed(2); }
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#64748b', maxTicksLimit: 12, font: { size: 10 } }, grid: { color: '#1e293b' } },
+        y: {
+          ticks: { color: '#64748b', font: { size: 10 }, callback: function(v) { return '$' + v.toFixed(2); } },
+          grid: { color: '#1e293b' }
+        }
+      }
+    }
+  });
+}
+
+function renderDonutChart(points) {
+  var modelTotals = {};
+  points.forEach(function(p) {
+    modelTotals[p.model] = (modelTotals[p.model] || 0) + p.cost;
+  });
+  var sorted = Object.entries(modelTotals).sort(function(a,b) { return b[1] - a[1]; });
+  var labels = sorted.map(function(s) { return s[0]; });
+  var data = sorted.map(function(s) { return s[1]; });
+  if (modelDonutChart) { modelDonutChart.destroy(); }
+  var ctx = document.getElementById('modelDonutChart').getContext('2d');
+  modelDonutChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: labels,
+      datasets: [{ data: data, backgroundColor: CHART_COLORS.slice(0, labels.length), borderWidth: 0 }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#94a3b8', boxWidth: 12, padding: 8, font: { size: 10 } } },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              var total = ctx.dataset.data.reduce(function(a,b) { return a + b; }, 0);
+              var pct = ((ctx.parsed / total) * 100).toFixed(1);
+              return ctx.label + ': $' + ctx.parsed.toFixed(2) + ' (' + pct + '%)';
+            }
+          }
+        }
+      }
+    }
+  });
 }
 
 loadSummary('24h');
 loadCosts('24h');
+loadCharts('24h');
 loadPlaygroundModels();
 checkEmptyState();
 
@@ -226,7 +352,10 @@ evtSource.addEventListener('cost', function(e) {
     '</tr>';
   var tbody = document.getElementById('costs');
   tbody.insertAdjacentHTML('afterbegin', row);
-  setTimeout(function() { loadSummary(currentPeriod); }, 500);
+  setTimeout(function() {
+    loadSummary(currentPeriod);
+    loadCharts(currentPeriod);
+  }, 500);
 });
 evtSource.addEventListener('anomaly', function(e) {
   var d = JSON.parse(e.data);
@@ -320,6 +449,7 @@ async function seedDemoData() {
     hideWizard();
     loadSummary(currentPeriod);
     loadCosts(currentPeriod);
+    loadCharts(currentPeriod);
   } catch (e) {
     if (status) status.textContent = 'Error: ' + e.message;
     if (btn) { btn.disabled = false; btn.textContent = 'Seed Demo Data'; }

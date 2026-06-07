@@ -199,7 +199,7 @@ func TestSelectProvider_DeterministicSeed(t *testing.T) {
 
 func TestWriteError_ResponseFormat(t *testing.T) {
 	w := httptest.NewRecorder()
-	writeError(w, http.StatusBadGateway, "upstream error")
+	writeError(w, http.StatusBadGateway, "upstream error", "test-req-id")
 	resp := w.Result()
 	if resp.StatusCode != http.StatusBadGateway {
 		t.Errorf("expected 502, got %d", resp.StatusCode)
@@ -218,7 +218,7 @@ func TestWriteError_AllStatusCodes(t *testing.T) {
 	}
 	for _, code := range codes {
 		w := httptest.NewRecorder()
-		writeError(w, code, "test error")
+		writeError(w, code, "test error", "")
 		if w.Result().StatusCode != code {
 			t.Errorf("expected status %d, got %d", code, w.Result().StatusCode)
 		}

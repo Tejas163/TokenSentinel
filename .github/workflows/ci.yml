@@ -24,6 +24,20 @@ jobs:
       - run: cargo build --verbose
       - run: cargo test --verbose
 
+  mcp-gateway:
+    name: MCP Gateway
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: proxyops_gateway/mcp-gateway
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1
+        with:
+          toolchain: stable
+      - run: cargo build --verbose
+      - run: cargo test --verbose
+
   go-router:
     name: Go Router
     runs-on: ubuntu-latest

@@ -11,6 +11,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,6 +21,11 @@ import (
 )
 
 var rdb *redis.Client
+var defaultPool *workerPool
+
+type contextKey string
+
+const reqIDKey contextKey = "request_id"
 
 var authAPIKey string
 
@@ -123,10 +129,14 @@ func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	authAPIKey = os.Getenv("AUTH_API_KEY")
 
+	initSemanticCache(rdb)
+	initRateLimiter()
+	defaultPool = newWorkerPool(0)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", authMiddleware(healthHandler))
 	mux.HandleFunc("/metrics", authMiddleware(metricsHandler))
-	mux.HandleFunc("/", authMiddleware(proxyHandler))
+	mux.HandleFunc("/", authMiddleware(rateLimitMiddleware(proxyHandler)))
 
 	slog.Info("starting server", "addr", ":8080", "redis", redisAddr, "auth_enabled", authAPIKey != "")
 	if err := http.ListenAndServe(":8080", mux); err != nil {
@@ -166,6 +176,13 @@ func getHTTPClient(timeout int) *http.Client {
 	return client
 }
 
+func getReqID(r *http.Request) string {
+	if id, ok := r.Context().Value(reqIDKey).(string); ok && id != "" {
+		return id
+	}
+	return r.Header.Get("X-Request-ID")
+}
+
 func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if authAPIKey == "" {
@@ -180,7 +197,7 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 		if key == "" || key != authAPIKey {
 			slog.Warn("auth failure", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr)
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeError(w, http.StatusUnauthorized, "unauthorized", "")
 			return
 		}
 		next(w, r)
@@ -199,24 +216,45 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		metricsRequestsError.Add(1)
 		slog.Error("route resolution failed", "request_id", reqID, "path", r.URL.Path, "error", err)
-		writeError(w, http.StatusBadGateway, "route resolution failed")
+		writeError(w, http.StatusBadGateway, "route resolution failed", reqID)
 		return
 	}
 	if route == nil {
 		metricsRequestsError.Add(1)
 		slog.Warn("no route for path", "request_id", reqID, "path", r.URL.Path)
-		writeError(w, http.StatusNotFound, "no route for path")
+		writeError(w, http.StatusNotFound, "no route for path", reqID)
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		metricsRequestsError.Add(1)
 		slog.Error("failed to read request body", "request_id", reqID, "error", err)
-		writeError(w, http.StatusBadRequest, "failed to read request body")
+		if err.Error() == "http: request body too large" {
+			writeError(w, http.StatusRequestEntityTooLarge, "request body exceeds 10MB limit", reqID)
+		} else {
+			writeError(w, http.StatusBadRequest, "failed to read request body", reqID)
+		}
 		return
 	}
 	defer r.Body.Close()
+
+	if semanticCache != nil {
+		promptText := extractPromptText(body)
+		if cached, err := semanticCache.Lookup(r.Context(), promptText); err == nil && cached != nil {
+			inputTokens := estimateTokens(string(body), cached.Model)
+			savingsCents := estimateCost(inputTokens, cached.OutputTokens, cached.Model)
+			slog.Info("semantic cache hit", "request_id", reqID, "model", cached.Model, "savings_cents", savingsCents, "similarity", "cached")
+			w.Header().Set("X-Cache", "HIT")
+			w.Header().Set("X-Model-Used", cached.Model)
+			w.Header().Set("X-Cost-Cents", "0.00")
+			w.Header().Set("X-Cache-Savings-Cents", fmt.Sprintf("%.2f", savingsCents))
+			w.WriteHeader(cached.StatusCode)
+			w.Write(cached.Body)
+			return
+		}
+	}
 
 	target := selectProvider(route.Providers)
 	if route.AutoModel {
@@ -225,57 +263,102 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 	if target == nil {
 		metricsRequestsError.Add(1)
 		slog.Error("no available providers", "request_id", reqID, "path", r.URL.Path)
-		writeError(w, http.StatusServiceUnavailable, "no available providers")
+		writeError(w, http.StatusServiceUnavailable, "no available providers", reqID)
 		return
 	}
 
 	if team := r.Header.Get("X-Team-Name"); team != "" {
-		used, err := rdb.Get(r.Context(), fmt.Sprintf("budget:team:%s:used", team)).Int64()
-		if err == nil {
-			limit, err2 := rdb.Get(r.Context(), fmt.Sprintf("budget:team:%s:limit", team)).Int64()
-			if err2 == nil && used >= limit {
-				cheapest := cheapestProvider(route.Providers)
-				if cheapest != nil && cheapest.URL != target.URL {
-					slog.Warn("team over budget, routing to cheapest", "team", team, "original", target.URL, "cheapest", cheapest.URL)
-					target = cheapest
+		usedRaw, err := rdb.Get(r.Context(), fmt.Sprintf("budget:team:%s:used", team)).Result()
+		if err == redis.Nil {
+			slog.Debug("budget: no usage record for team", "team", team)
+		} else if err != nil {
+			slog.Error("budget: failed to read usage", "team", team, "error", err)
+		} else {
+			used, parseErr := strconv.ParseInt(usedRaw, 10, 64)
+			if parseErr != nil || used < 0 {
+				slog.Error("budget: invalid usage value", "team", team, "raw", usedRaw)
+			} else {
+				limitRaw, err2 := rdb.Get(r.Context(), fmt.Sprintf("budget:team:%s:limit", team)).Result()
+				if err2 == redis.Nil {
+					slog.Debug("budget: no limit set for team", "team", team)
+				} else if err2 != nil {
+					slog.Error("budget: failed to read limit", "team", team, "error", err2)
+				} else {
+					limit, parseErr2 := strconv.ParseInt(limitRaw, 10, 64)
+					if parseErr2 != nil || limit <= 0 {
+						slog.Error("budget: invalid limit value", "team", team, "raw", limitRaw)
+					} else if used >= limit {
+						cheapest := cheapestProvider(route.Providers)
+						if cheapest != nil && cheapest.URL != target.URL {
+							slog.Warn("team over budget, routing to cheapest", "team", team, "used", used, "limit", limit, "original", target.URL, "original_model", target.Model, "cheapest", cheapest.URL, "cheapest_model", cheapest.Model)
+							target = cheapest
+						}
+					} else {
+						slog.Debug("budget OK", "team", team, "used", used, "limit", limit)
+					}
 				}
 			}
 		}
 	}
 
-	cbKey := fmt.Sprintf("cb:%s", target.URL)
-	cb := getOrCreateCB(cbKey)
-
-	if !cb.Allow() {
-		metricsCircuitOpen.Add(1)
+	ml := applyBodyLimitOverride(getModelLimit(target.Model))
+	inputTokens := estimateTokens(string(body), target.Model)
+	if inputTokens > ml.maxInputTokens {
 		metricsRequestsError.Add(1)
-		slog.Warn("circuit breaker open", "request_id", reqID, "provider", target.URL)
-		writeError(w, http.StatusServiceUnavailable, "provider temporarily unavailable")
+		slog.Error("input exceeds model context window", "request_id", reqID, "model", target.Model, "input_tokens", inputTokens, "limit", ml.maxInputTokens)
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("input of %d tokens exceeds model %s limit of %d tokens", inputTokens, target.Model, ml.maxInputTokens), reqID)
 		return
 	}
-	metricsCircuitClosed.Add(1)
 
-	statusCode, respBody, err := proxyWithRetry(r.Context(), reqID, target.URL, r.Method, body, r.Header)
+	chain := buildFallbackChain(target, route.Providers)
+	statusCode, respBody, usedProvider, err := proxyWithFallback(r.Context(), reqID, chain, r.Method, body, r.Header)
 	latency := time.Since(start).Milliseconds()
 	metricsUpstreamLatency.Add(fmt.Sprintf("%dms", latency/100*100), 1)
 
 	if err != nil {
-		cb.Failure()
 		metricsRequestsError.Add(1)
 		slog.Error("upstream error", "request_id", reqID, "provider", target.URL, "error", err, "latency_ms", latency)
-		writeError(w, http.StatusBadGateway, "upstream error")
+		writeError(w, http.StatusBadGateway, "upstream error", reqID)
 		return
 	}
 
-	cb.Success()
+	if usedProvider != nil && usedProvider.URL != target.URL {
+		slog.Warn("fallback provider succeeded", "request_id", reqID, "original", target.URL, "original_model", target.Model, "used", usedProvider.URL, "used_model", usedProvider.Model)
+		target = usedProvider
+		w.Header().Set("X-Cost-Routing", "fallback")
+	}
+
 	metricsRequestsSuccess.Add(1)
 	slog.Info("request complete", "request_id", reqID, "provider", target.URL, "model", target.Model, "status", statusCode, "latency_ms", latency)
 
-	inputTokens := estimateTokens(string(body), target.Model)
+	inputTokens = estimateTokens(string(body), target.Model)
 	outputTokens := estimateTokens(string(respBody), target.Model)
-	go recordCost(context.Background(), reqID, target.Model, inputTokens, outputTokens)
+	defaultPool.Submit(costTask{
+		reqID:        reqID,
+		model:        target.Model,
+		inputTokens:  inputTokens,
+		outputTokens: outputTokens,
+	})
 
 	costCents := estimateCost(inputTokens, outputTokens, target.Model)
+
+	if semanticCache != nil {
+		promptText := extractPromptText(body)
+		if statusCode >= 200 && statusCode < 300 && promptText != "" {
+			defaultPool.Submit(cacheTask{
+				promptText: promptText,
+				resp: &CachedResponse{
+					Body:         respBody,
+					Model:        target.Model,
+					StatusCode:   statusCode,
+					OutputTokens: outputTokens,
+					CachedAt:     time.Now().Unix(),
+				},
+			})
+		}
+		w.Header().Set("X-Cache", "MISS")
+	}
+
 	w.Header().Set("X-Model-Used", target.Model)
 	w.Header().Set("X-Cost-Cents", fmt.Sprintf("%.2f", costCents))
 	w.WriteHeader(statusCode)
@@ -364,21 +447,23 @@ func selectProvider(providers []UpstreamConfig) *UpstreamConfig {
 	}
 
 	totalWeight := 0
-	for _, p := range providers {
-		if p.Weight <= 0 {
-			p.Weight = 1
-		}
-		totalWeight += p.Weight
+	weights := make([]int, len(providers))
+	for i, p := range providers {
+		w := adaptiveWeight(p)
+		weights[i] = w
+		totalWeight += w
 	}
+
+	if totalWeight <= 0 {
+		return &providers[0]
+	}
+
+	logAdaptiveWeights(providers)
 
 	roll := rand.Intn(totalWeight)
 	cumulative := 0
 	for i := range providers {
-		w := providers[i].Weight
-		if w <= 0 {
-			w = 1
-		}
-		cumulative += w
+		cumulative += weights[i]
 		if roll < cumulative {
 			return &providers[i]
 		}
@@ -475,15 +560,17 @@ func recordCost(ctx context.Context, reqID, model string, inputTokens, outputTok
 		}
 		slog.Error("failed to record cost", "request_id", reqID, "attempt", attempt+1, "max_retries", maxRetries, "error", err)
 	}
+	slog.Warn("cost write failed after all retries, logging to stderr", "request_id", reqID, "model", model, "input_tokens", inputTokens, "output_tokens", outputTokens, "data", string(data))
 }
 
-type ErrorResponse struct {
-	Error   string `json:"error"`
-	Request string `json:"request_id,omitempty"`
-}
+	type ErrorResponse struct {
+		Error     string `json:"error"`
+		Request   string `json:"request_id,omitempty"`
+		ErrorCode string `json:"error_code,omitempty"`
+	}
 
-func writeError(w http.ResponseWriter, status int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(ErrorResponse{Error: msg})
-}
+	func writeError(w http.ResponseWriter, status int, msg, reqID string) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		json.NewEncoder(w).Encode(ErrorResponse{Error: msg, Request: reqID})
+	}

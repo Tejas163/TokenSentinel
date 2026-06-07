@@ -13,6 +13,7 @@ import (
 	"html/template"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"os/signal"
@@ -259,6 +260,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	replayMissedCostEvents(ctx)
 	go subscribeCostEvents(ctx)
 	go monitorSpendTrends(ctx)
 	go trackSavings(ctx)
@@ -276,6 +278,7 @@ func main() {
 	mux.HandleFunc("/api/health/all", authMiddleware(handleHealthAll))
 	mux.HandleFunc("/api/dashboard/costs", orgMiddleware(handleCosts))
 	mux.HandleFunc("/api/dashboard/summary", orgMiddleware(handleSummary))
+	mux.HandleFunc("/api/dashboard/cost-timeseries", orgMiddleware(handleCostTimeSeries))
 	mux.HandleFunc("/api/dashboard/anomalies", orgMiddleware(handleAnomalies))
 	mux.HandleFunc("/api/dashboard/events", authMiddleware(handleSSE))
 	mux.HandleFunc("/api/admin/budget-rules", rateLimitMiddleware(orgMiddleware(handleBudgetRules)))
@@ -294,6 +297,7 @@ func main() {
 	mux.HandleFunc("/v1/health/all", authMiddleware(handleHealthAll))
 	mux.HandleFunc("/v1/dashboard/costs", orgMiddleware(handleCosts))
 	mux.HandleFunc("/v1/dashboard/summary", orgMiddleware(handleSummary))
+	mux.HandleFunc("/v1/dashboard/cost-timeseries", orgMiddleware(handleCostTimeSeries))
 	mux.HandleFunc("/v1/dashboard/anomalies", orgMiddleware(handleAnomalies))
 	mux.HandleFunc("/v1/dashboard/events", authMiddleware(handleSSE))
 	mux.HandleFunc("/v1/admin/budget-rules", rateLimitMiddleware(orgMiddleware(handleBudgetRules)))
@@ -782,6 +786,28 @@ func handleAnomalies(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(results)
 }
 
+func replayMissedCostEvents(ctx context.Context) {
+	var cursor uint64
+	for {
+		keys, nextCursor, err := rdb.Scan(ctx, cursor, "sentinel:*:cost", 100).Result()
+		if err != nil {
+			log.Printf("failed to scan cost keys for replay: %v", err)
+			return
+		}
+		for _, key := range keys {
+			reqID := strings.TrimPrefix(key, "sentinel:")
+			reqID = strings.TrimSuffix(reqID, ":cost")
+			if reqID != "" {
+				ingestCost(ctx, reqID)
+			}
+		}
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+}
+
 func subscribeCostEvents(ctx context.Context) {
 	pubsub := rdb.Subscribe(ctx, "health:events")
 	defer pubsub.Close()
@@ -1011,6 +1037,112 @@ func handleSummary(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(summary)
+}
+
+// costTimePoint represents one data point in the cost time-series.
+type costTimePoint struct {
+	Hour   string  `json:"hour"`
+	Model  string  `json:"model"`
+	Cost   float64 `json:"cost"`
+	Tokens int64   `json:"tokens"`
+}
+
+func handleCostTimeSeries(w http.ResponseWriter, r *http.Request) {
+	period := r.URL.Query().Get("period")
+	if period == "" {
+		period = "24h"
+	}
+	since, err := time.ParseDuration(period)
+	if err != nil {
+		http.Error(w, "invalid period", http.StatusBadRequest)
+		return
+	}
+	sinceStr := time.Now().UTC().Add(-since).Format(time.RFC3339)
+	orgID := getOrgID(r)
+
+	query := `SELECT hour_start, model, total_tokens, total_input, total_output
+		FROM cost_summary_hourly WHERE hour_start >= $1`
+	args := []interface{}{sinceStr}
+	if orgID != "" {
+		query += ` AND org_id = $2`
+		args = append(args, orgID)
+	}
+	query += ` ORDER BY hour_start ASC`
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		log.Printf("cost timeseries query error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var points []costTimePoint
+	for rows.Next() {
+		var hour time.Time
+		var model string
+		var totalTokens, totalInput, totalOutput int64
+		if err := rows.Scan(&hour, &model, &totalTokens, &totalInput, &totalOutput); err != nil {
+			log.Printf("scan cost timeseries row: %v", err)
+			continue
+		}
+		price := modelPrice(model)
+		cost := (float64(totalInput)/1000)*price.Input + (float64(totalOutput)/1000)*price.Output
+		points = append(points, costTimePoint{
+			Hour:   hour.Format(time.RFC3339),
+			Model:  model,
+			Cost:   math.Round(cost*100) / 100,
+			Tokens: totalTokens,
+		})
+	}
+
+	if points == nil {
+		points = []costTimePoint{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(points)
+}
+
+type modelPriceEntry struct {
+	Input  float64
+	Output float64
+}
+
+func modelPrice(model string) modelPriceEntry {
+	for _, entry := range modelCatalog {
+		if strings.HasPrefix(strings.ToLower(model), strings.ToLower(entry.prefix)) {
+			return entry.price
+		}
+	}
+	return modelPriceEntry{Input: 3.00, Output: 15.00}
+}
+
+var modelCatalog = []struct {
+	prefix string
+	price  modelPriceEntry
+}{
+	{"gpt-4o",            modelPriceEntry{2.50, 10.00}},
+	{"gpt-4-turbo",       modelPriceEntry{10.00, 30.00}},
+	{"gpt-4",             modelPriceEntry{30.00, 60.00}},
+	{"gpt-4o-mini",       modelPriceEntry{0.15, 0.60}},
+	{"gpt-3.5",           modelPriceEntry{0.50, 1.50}},
+	{"claude-3-opus",     modelPriceEntry{15.00, 75.00}},
+	{"claude-3-sonnet",   modelPriceEntry{3.00, 15.00}},
+	{"claude-3-haiku",    modelPriceEntry{0.25, 1.25}},
+	{"claude-3.5-sonnet", modelPriceEntry{3.00, 15.00}},
+	{"claude-3.5-haiku",  modelPriceEntry{0.25, 1.25}},
+	{"llama-3-8b",        modelPriceEntry{0.05, 0.20}},
+	{"llama-3-70b",       modelPriceEntry{0.59, 0.79}},
+	{"llama-3.1-405b",    modelPriceEntry{2.50, 10.00}},
+	{"mixtral-8x7b",      modelPriceEntry{0.24, 0.72}},
+	{"mistral-large",     modelPriceEntry{2.00, 6.00}},
+	{"mistral-medium",    modelPriceEntry{0.70, 2.10}},
+	{"mistral-small",     modelPriceEntry{0.20, 0.60}},
+	{"gemini-1.5-pro",    modelPriceEntry{1.25, 5.00}},
+	{"gemini-1.5-flash",  modelPriceEntry{0.075, 0.30}},
+	{"gemini-2.0-pro",    modelPriceEntry{2.50, 10.00}},
+	{"gemini-2.0-flash",  modelPriceEntry{0.10, 0.40}},
 }
 
 func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
