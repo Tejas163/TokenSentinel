@@ -36,14 +36,16 @@ func RunAssessment(store Store, assessmentID int) (*AssessmentReport, error) {
 	costBreakdown := calculateCostBreakdown(a, liveData)
 	recommendations := generateRecommendations(a, costBreakdown)
 	totalCurrent := 0.0
-	totalProjected := 0.0
 	for _, c := range costBreakdown {
 		totalCurrent += c.CurrentMonthlyCost
-		totalProjected += c.ProjectedMonthlyCost
 	}
 	totalSavings := 0.0
 	for _, r := range recommendations {
 		totalSavings += r.MonthlySavings
+	}
+	totalProjected := totalCurrent - totalSavings
+	if totalProjected < 0 {
+		totalProjected = 0
 	}
 
 	store.ReplaceCostProjections(assessmentID, costBreakdown)
@@ -325,17 +327,16 @@ func GetReport(store Store, assessmentID int) (*AssessmentReport, error) {
 	}
 
 	totalCurrent := 0.0
-	totalProjected := 0.0
 	for _, cp := range projections {
 		totalCurrent += cp.CurrentMonthlyCost
-		totalProjected += cp.ProjectedMonthlyCost
 	}
-	totalSavings := totalCurrent - totalProjected
-	if totalSavings < 0 {
-		totalSavings = 0
-	}
+	totalSavings := 0.0
 	for _, r := range recs {
 		totalSavings += r.MonthlySavings
+	}
+	totalProjected := totalCurrent - totalSavings
+	if totalProjected < 0 {
+		totalProjected = 0
 	}
 
 	return &AssessmentReport{
