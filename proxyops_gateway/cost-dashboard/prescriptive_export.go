@@ -142,19 +142,19 @@ func generatePDF(w http.ResponseWriter, report *engine.AssessmentReport) {
 		m.AddRow(12).Add(text.NewCol(12, "", props.Text{}))
 	}
 
-	m.AddRow(12).Add(text.NewCol(12, "1. Executive Summary", props.Text{Style: fontstyle.Bold, Size: 14}))
-	m.AddRow(8).Add(text.NewCol(12, fmt.Sprintf("Your current monthly AI infrastructure spend is $%.2f.", report.TotalCurrent), props.Text{Size: 10}))
-	m.AddRow(8).Add(text.NewCol(12, fmt.Sprintf("After applying the recommended optimizations in this report, your projected monthly spend is $%.2f.", report.TotalProjected), props.Text{Size: 10}))
-	m.AddRow(8).Add(text.NewCol(12, fmt.Sprintf("This represents a potential savings of $%.2f per month.", report.TotalSavings), props.Text{Size: 10}))
+	m.AddRow(12).Add(text.NewCol(12, "1. Executive Summary", props.Text{Style: fontstyle.Bold, Size: 14, Align: align.Left}))
+	m.AddRow(8).Add(text.NewCol(12, fmt.Sprintf("Your current monthly AI infrastructure spend is $%.2f.", report.TotalCurrent), props.Text{Size: 10, Align: align.Left}))
+	m.AddRow(8).Add(text.NewCol(12, fmt.Sprintf("After applying the recommended optimizations in this report, your projected monthly spend is $%.2f.", report.TotalProjected), props.Text{Size: 10, Align: align.Left}))
+	m.AddRow(8).Add(text.NewCol(12, fmt.Sprintf("This represents a potential savings of $%.2f per month.", report.TotalSavings), props.Text{Size: 10, Align: align.Left}))
 	if report.TotalCurrent > 0 {
 		m.AddRow(8).Add(text.NewCol(12, fmt.Sprintf("Your estimated savings rate is %.1f%%, meaning you could reduce your AI costs by nearly %.0f%% with the changes outlined below.",
-			(report.TotalSavings/report.TotalCurrent)*100, (report.TotalSavings/report.TotalCurrent)*100), props.Text{Size: 10}))
+			(report.TotalSavings/report.TotalCurrent)*100, (report.TotalSavings/report.TotalCurrent)*100), props.Text{Size: 10, Align: align.Left}))
 	}
 	m.AddRow(10).Add(text.NewCol(12, "", props.Text{}))
 
 	if len(report.Recommendations) > 0 {
-		m.AddRow(12).Add(text.NewCol(12, "2. Recommendations", props.Text{Style: fontstyle.Bold, Size: 14}))
-		m.AddRow(8).Add(text.NewCol(12, "The following recommendations are ranked by potential impact. Each includes an estimated monthly savings and a payback period indicating how quickly the change pays for itself.", props.Text{Size: 10}))
+		m.AddRow(12).Add(text.NewCol(12, "2. Recommendations", props.Text{Style: fontstyle.Bold, Size: 14, Align: align.Left}))
+		m.AddRow(8).Add(text.NewCol(12, "The following recommendations are ranked by potential impact. Each includes an estimated monthly savings and a payback period indicating how quickly the change pays for itself.", props.Text{Size: 10, Align: align.Left}))
 
 		for i, r := range report.Recommendations {
 			if i > 0 {
@@ -183,8 +183,8 @@ func generatePDF(w http.ResponseWriter, report *engine.AssessmentReport) {
 	}
 
 	if len(report.CostBreakdown) > 0 {
-		m.AddRow(12).Add(text.NewCol(12, "3. Cost Breakdown by Model", props.Text{Style: fontstyle.Bold, Size: 14}))
-		m.AddRow(8).Add(text.NewCol(12, "The table below shows your current spending by model and what each line item would cost after implementing all recommendations.", props.Text{Size: 10}))
+		m.AddRow(12).Add(text.NewCol(12, "3. Cost Breakdown by Model", props.Text{Style: fontstyle.Bold, Size: 14, Align: align.Left}))
+		m.AddRow(8).Add(text.NewCol(12, "The table below shows your current spending by model and what each line item would cost after implementing all recommendations.", props.Text{Size: 10, Align: align.Left}))
 
 		m.AddRows(row.New(10).Add(
 			col.New(3).Add(text.New("Model", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Left})),
@@ -208,12 +208,12 @@ func generatePDF(w http.ResponseWriter, report *engine.AssessmentReport) {
 		m.AddRow(10).Add(text.NewCol(12, "", props.Text{}))
 	}
 
-	m.AddRow(12).Add(text.NewCol(12, "4. Next Steps", props.Text{Style: fontstyle.Bold, Size: 14}))
-	m.AddRow(8).Add(text.NewCol(12, "1. Review each recommendation with your engineering team to assess feasibility.", props.Text{Size: 10}))
-	m.AddRow(8).Add(text.NewCol(12, "2. Start with high-priority items that offer the fastest payback period.", props.Text{Size: 10}))
-	m.AddRow(8).Add(text.NewCol(12, "3. Use the What-If Simulator in your dashboard to model additional scenarios.", props.Text{Size: 10}))
-	m.AddRow(8).Add(text.NewCol(12, "4. Re-run this assessment after implementing changes to track your savings.", props.Text{Size: 10}))
-	m.AddRow(8).Add(text.NewCol(12, "5. Contact TokenSentinel support for help with implementation.", props.Text{Size: 10}))
+	m.AddRow(12).Add(text.NewCol(12, "4. Next Steps", props.Text{Style: fontstyle.Bold, Size: 14, Align: align.Left}))
+	m.AddRow(8).Add(text.NewCol(12, "1. Review each recommendation with your engineering team to assess feasibility.", props.Text{Size: 10, Align: align.Left}))
+	m.AddRow(8).Add(text.NewCol(12, "2. Start with high-priority items that offer the fastest payback period.", props.Text{Size: 10, Align: align.Left}))
+	m.AddRow(8).Add(text.NewCol(12, "3. Use the What-If Simulator in your dashboard to model additional scenarios.", props.Text{Size: 10, Align: align.Left}))
+	m.AddRow(8).Add(text.NewCol(12, "4. Re-run this assessment after implementing changes to track your savings.", props.Text{Size: 10, Align: align.Left}))
+	m.AddRow(8).Add(text.NewCol(12, "5. Contact TokenSentinel support for help with implementation.", props.Text{Size: 10, Align: align.Left}))
 
 	m.AddRow(20).Add(text.NewCol(12, fmt.Sprintf("TokenSentinel — %s", time.Now().UTC().Format("2006")), props.Text{
 		Size: 8, Align: align.Center,
