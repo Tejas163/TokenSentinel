@@ -15,13 +15,17 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"os"
 	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
 	"syscall"
-	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/proxyops/internal/engine"
@@ -139,6 +143,72 @@ var (
 	anomalyInterval    = 5 * time.Minute
 	retentionMaxAge    = 90
 )
+
+var (
+	httpRequestsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "cost_dashboard_http_requests_total",
+			Help: "Total number of HTTP requests",
+		},
+		[]string{"method", "path", "status"},
+	)
+	httpRequestDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "cost_dashboard_http_request_duration_seconds",
+			Help:    "HTTP request latency in seconds",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"method", "path"},
+	)
+	activeConnections = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "cost_dashboard_active_connections",
+			Help: "Number of active SSE connections",
+		},
+	)
+	costEntriesTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "cost_dashboard_cost_entries_total",
+			Help: "Total number of cost entries ingested",
+		},
+	)
+	anomaliesDetected = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "cost_dashboard_anomalies_detected_total",
+			Help: "Total number of anomalies detected",
+		},
+	)
+	alertsFired = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "cost_dashboard_alerts_fired_total",
+			Help: "Total number of alerts fired",
+		},
+	)
+	budgetAlertsFired = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "cost_dashboard_budget_alerts_fired_total",
+			Help: "Total number of budget alerts fired",
+		},
+	)
+	dbQueryDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "cost_dashboard_db_query_duration_seconds",
+			Help:    "Database query latency in seconds",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"query"},
+	)
+)
+
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
+}
 
 type CostEntry struct {
 	RequestID    string `json:"request_id"`
@@ -282,51 +352,63 @@ func main() {
 	go refreshCostSummary(ctx)
 	go monitorAlertsEscalation(ctx)
 
+	metricsMiddleware := func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+			wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+			next(wrapped, r)
+			duration := time.Since(start).Seconds()
+			httpRequestsTotal.WithLabelValues(r.Method, r.URL.Path, fmt.Sprintf("%d", wrapped.statusCode)).Inc()
+			httpRequestDuration.WithLabelValues(r.Method, r.URL.Path).Observe(duration)
+		}
+	}
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", authMiddleware(handleDashboardHealth))
-	mux.HandleFunc("/api/health/all", authMiddleware(handleHealthAll))
-	mux.HandleFunc("/api/dashboard/costs", orgMiddleware(handleCosts))
-	mux.HandleFunc("/api/dashboard/summary", orgMiddleware(handleSummary))
-	mux.HandleFunc("/api/dashboard/cost-timeseries", orgMiddleware(handleCostTimeSeries))
-	mux.HandleFunc("/api/dashboard/anomalies", orgMiddleware(handleAnomalies))
-	mux.HandleFunc("/api/dashboard/events", authMiddleware(handleSSE))
-	mux.HandleFunc("/api/admin/budget-rules", rateLimitMiddleware(orgMiddleware(handleBudgetRules)))
-	mux.HandleFunc("/api/admin/teams", rateLimitMiddleware(orgMiddleware(handleTeams)))
-	mux.HandleFunc("/api/admin/pricing", rateLimitMiddleware(orgMiddleware(handleAdminPricing)))
-	mux.HandleFunc("/api/admin/pricing/", rateLimitMiddleware(orgMiddleware(handleAdminPricing)))
-	mux.HandleFunc("/api/admin/seed-demo", rateLimitMiddleware(authMiddleware(handleAdminSeed)))
-	mux.HandleFunc("/api/admin/escalation-policies", rateLimitMiddleware(orgMiddleware(handleEscalationPolicies)))
-	mux.HandleFunc("/api/budget/status", orgMiddleware(handleBudgetStatus))
-	mux.HandleFunc("/api/playground/models", authMiddleware(handlePlaygroundModels))
-	mux.HandleFunc("/api/playground/send", authMiddleware(handlePlaygroundSend))
-	mux.HandleFunc("/api/prescriptive/report/", handleReportFrontend)
-	mux.HandleFunc("/api/prescriptive/", orgMiddleware(handlePrescriptiveRouter))
-	mux.HandleFunc("/api/monitoring/", orgMiddleware(handleMonitoringRouter))
-	mux.HandleFunc("/v1/health", authMiddleware(handleDashboardHealth))
-	mux.HandleFunc("/v1/health/all", authMiddleware(handleHealthAll))
-	mux.HandleFunc("/v1/dashboard/costs", orgMiddleware(handleCosts))
-	mux.HandleFunc("/v1/dashboard/summary", orgMiddleware(handleSummary))
-	mux.HandleFunc("/v1/dashboard/cost-timeseries", orgMiddleware(handleCostTimeSeries))
-	mux.HandleFunc("/v1/dashboard/anomalies", orgMiddleware(handleAnomalies))
-	mux.HandleFunc("/v1/dashboard/events", authMiddleware(handleSSE))
-	mux.HandleFunc("/v1/admin/budget-rules", rateLimitMiddleware(orgMiddleware(handleBudgetRules)))
-	mux.HandleFunc("/v1/admin/teams", rateLimitMiddleware(orgMiddleware(handleTeams)))
-	mux.HandleFunc("/v1/admin/pricing", rateLimitMiddleware(orgMiddleware(handleAdminPricing)))
-	mux.HandleFunc("/v1/admin/pricing/", rateLimitMiddleware(orgMiddleware(handleAdminPricing)))
-	mux.HandleFunc("/v1/admin/seed-demo", rateLimitMiddleware(authMiddleware(handleAdminSeed)))
-	mux.HandleFunc("/v1/admin/escalation-policies", rateLimitMiddleware(orgMiddleware(handleEscalationPolicies)))
-	mux.HandleFunc("/v1/budget/status", orgMiddleware(handleBudgetStatus))
-	mux.HandleFunc("/v1/playground/models", authMiddleware(handlePlaygroundModels))
-	mux.HandleFunc("/v1/playground/send", authMiddleware(handlePlaygroundSend))
-	mux.HandleFunc("/v1/prescriptive/report/", handleReportFrontend)
-	mux.HandleFunc("/v1/prescriptive/", orgMiddleware(handlePrescriptiveRouter))
-	mux.HandleFunc("/v1/monitoring/", orgMiddleware(handleMonitoringRouter))
-	mux.HandleFunc("/static/styles.css", handleStaticCSS)
-	mux.HandleFunc("/assessments", handleAssessmentFrontend)
-	mux.HandleFunc("/dashboard", handleDashboard)
-	mux.HandleFunc("/enterprise", handleEnterprisePage)
-	mux.HandleFunc("/api/enterprise/inquiry", handleEnterpriseInquiry)
-	mux.HandleFunc("/", handleLanding)
+	mux.Handle("/metrics", promhttp.Handler())
+	mux.HandleFunc("/health", metricsMiddleware(authMiddleware(handleDashboardHealth)))
+	mux.HandleFunc("/api/health/all", metricsMiddleware(authMiddleware(handleHealthAll)))
+	mux.HandleFunc("/api/dashboard/costs", metricsMiddleware(orgMiddleware(handleCosts)))
+	mux.HandleFunc("/api/dashboard/summary", metricsMiddleware(orgMiddleware(handleSummary)))
+	mux.HandleFunc("/api/dashboard/cost-timeseries", metricsMiddleware(orgMiddleware(handleCostTimeSeries)))
+	mux.HandleFunc("/api/dashboard/anomalies", metricsMiddleware(orgMiddleware(handleAnomalies)))
+	mux.HandleFunc("/api/dashboard/events", metricsMiddleware(authMiddleware(handleSSE)))
+	mux.HandleFunc("/api/admin/budget-rules", metricsMiddleware(rateLimitMiddleware(orgMiddleware(handleBudgetRules))))
+	mux.HandleFunc("/api/admin/teams", metricsMiddleware(rateLimitMiddleware(orgMiddleware(handleTeams))))
+	mux.HandleFunc("/api/admin/pricing", metricsMiddleware(rateLimitMiddleware(orgMiddleware(handleAdminPricing))))
+	mux.HandleFunc("/api/admin/pricing/", metricsMiddleware(rateLimitMiddleware(orgMiddleware(handleAdminPricing))))
+	mux.HandleFunc("/api/admin/seed-demo", metricsMiddleware(rateLimitMiddleware(authMiddleware(handleAdminSeed))))
+	mux.HandleFunc("/api/admin/escalation-policies", metricsMiddleware(rateLimitMiddleware(orgMiddleware(handleEscalationPolicies))))
+	mux.HandleFunc("/api/budget/status", metricsMiddleware(orgMiddleware(handleBudgetStatus)))
+	mux.HandleFunc("/api/playground/models", metricsMiddleware(authMiddleware(handlePlaygroundModels)))
+	mux.HandleFunc("/api/playground/send", metricsMiddleware(authMiddleware(handlePlaygroundSend)))
+	mux.HandleFunc("/api/prescriptive/report/", metricsMiddleware(handleReportFrontend))
+	mux.HandleFunc("/api/prescriptive/", metricsMiddleware(orgMiddleware(handlePrescriptiveRouter)))
+	mux.HandleFunc("/api/monitoring/", metricsMiddleware(orgMiddleware(handleMonitoringRouter)))
+	mux.HandleFunc("/v1/health", metricsMiddleware(authMiddleware(handleDashboardHealth)))
+	mux.HandleFunc("/v1/health/all", metricsMiddleware(authMiddleware(handleHealthAll)))
+	mux.HandleFunc("/v1/dashboard/costs", metricsMiddleware(orgMiddleware(handleCosts)))
+	mux.HandleFunc("/v1/dashboard/summary", metricsMiddleware(orgMiddleware(handleSummary)))
+	mux.HandleFunc("/v1/dashboard/cost-timeseries", metricsMiddleware(orgMiddleware(handleCostTimeSeries)))
+	mux.HandleFunc("/v1/dashboard/anomalies", metricsMiddleware(orgMiddleware(handleAnomalies)))
+	mux.HandleFunc("/v1/dashboard/events", metricsMiddleware(authMiddleware(handleSSE)))
+	mux.HandleFunc("/v1/admin/budget-rules", metricsMiddleware(rateLimitMiddleware(orgMiddleware(handleBudgetRules))))
+	mux.HandleFunc("/v1/admin/teams", metricsMiddleware(rateLimitMiddleware(orgMiddleware(handleTeams))))
+	mux.HandleFunc("/v1/admin/pricing", metricsMiddleware(rateLimitMiddleware(orgMiddleware(handleAdminPricing))))
+	mux.HandleFunc("/v1/admin/pricing/", metricsMiddleware(rateLimitMiddleware(orgMiddleware(handleAdminPricing))))
+	mux.HandleFunc("/v1/admin/seed-demo", metricsMiddleware(rateLimitMiddleware(authMiddleware(handleAdminSeed))))
+	mux.HandleFunc("/v1/admin/escalation-policies", metricsMiddleware(rateLimitMiddleware(orgMiddleware(handleEscalationPolicies))))
+	mux.HandleFunc("/v1/budget/status", metricsMiddleware(orgMiddleware(handleBudgetStatus)))
+	mux.HandleFunc("/v1/playground/models", metricsMiddleware(authMiddleware(handlePlaygroundModels)))
+	mux.HandleFunc("/v1/playground/send", metricsMiddleware(authMiddleware(handlePlaygroundSend)))
+	mux.HandleFunc("/v1/prescriptive/report/", metricsMiddleware(handleReportFrontend))
+	mux.HandleFunc("/v1/prescriptive/", metricsMiddleware(orgMiddleware(handlePrescriptiveRouter)))
+	mux.HandleFunc("/v1/monitoring/", metricsMiddleware(orgMiddleware(handleMonitoringRouter)))
+	mux.HandleFunc("/static/styles.css", metricsMiddleware(handleStaticCSS))
+	mux.HandleFunc("/assessments", metricsMiddleware(handleAssessmentFrontend))
+	mux.HandleFunc("/dashboard", metricsMiddleware(handleDashboard))
+	mux.HandleFunc("/enterprise", metricsMiddleware(handleEnterprisePage))
+	mux.HandleFunc("/api/enterprise/inquiry", metricsMiddleware(handleEnterpriseInquiry))
+	mux.HandleFunc("/", metricsMiddleware(handleLanding))
 
 	srv := &http.Server{Addr: ":" + port, Handler: mux}
 
@@ -716,6 +798,7 @@ func detectAnomalies(ctx context.Context) {
 					continue
 				}
 				slog.Warn("anomaly detected", "request_id", a.RequestID, "model", a.Model, "z_score", a.ZScore)
+				anomaliesDetected.Inc()
 				rdb.Publish(ctx, "anomaly:events", string(data))
 				events.broadcast(sseEvent{Type: "anomaly", Data: data})
 			}
@@ -867,6 +950,7 @@ func ingestCost(ctx context.Context, reqID string) {
 	}
 	n, _ := result.RowsAffected()
 	if n > 0 {
+		costEntriesTotal.Inc()
 		data, err := json.Marshal(map[string]interface{}{
 			"request_id":    reqID,
 			"model":         entry.Model,
@@ -1376,10 +1460,11 @@ func checkBudgets(ctx context.Context) {
 					slog.Error("budget webhook post error", "err", postErr)
 					continue
 				}
-				io.Copy(io.Discard, resp.Body)
-				resp.Body.Close()
-				slog.Info("budget alert fired", "rule_id", r.ID, "webhook_url", r.WebhookURL)
-				}
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			slog.Info("budget alert fired", "rule_id", r.ID, "webhook_url", r.WebhookURL)
+			budgetAlertsFired.Inc()
+			}
 			}
 			rows.Close()
 		case <-ctx.Done():
@@ -1803,6 +1888,9 @@ func handleSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	flusher.Flush()
+
+	activeConnections.Inc()
+	defer activeConnections.Dec()
 
 	ch := events.subscribe()
 	defer events.unsubscribe(ch)

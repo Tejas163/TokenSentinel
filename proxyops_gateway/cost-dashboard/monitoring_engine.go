@@ -282,6 +282,7 @@ func dispatchAlert(a Alert) {
 			} else {
 				io.Copy(io.Discard, resp.Body)
 				resp.Body.Close()
+				alertsFired.Inc()
 			}
 		}
 	}
