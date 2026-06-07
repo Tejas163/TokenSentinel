@@ -154,24 +154,24 @@ func generatePDF(w http.ResponseWriter, report *engine.AssessmentReport) {
 			if i > 0 {
 				m.AddRow(4).Add(text.NewCol(12, "", props.Text{}))
 			}
-			m.AddRows(row.New(10).Add(
-				col.New(1).Add(text.New(fmt.Sprintf("%d.", i+1), props.Text{Style: fontstyle.Bold, Size: 10})),
-				col.New(2).Add(text.New(strings.ToUpper(r.Priority), props.Text{
-					Style: fontstyle.Bold, Size: 9,
-				})),
-				col.New(9).Add(text.New(fmt.Sprintf("$%.0f/mo savings", r.MonthlySavings), props.Text{
-					Size: 10,
-				})),
-			))
-			m.AddRows(row.New(14).Add(
-				col.New(1).Add(text.New("", props.Text{Size: 8})),
-				col.New(11).Add(text.New(r.Description, props.Text{Size: 10})),
-			))
-			m.AddRows(row.New(8).Add(
-				col.New(1).Add(text.New("", props.Text{Size: 8})),
-				col.New(11).Add(text.New(fmt.Sprintf("Category: %s | Current spend: $%.0f/mo | Payback: %d days",
-					strings.ReplaceAll(r.Category, "_", " "), r.CurrentCost, r.PaybackPeriodDays), props.Text{Size: 8})),
-			))
+		m.AddRows(row.New(10).Add(
+			col.New(1).Add(text.New(fmt.Sprintf("%d.", i+1), props.Text{Style: fontstyle.Bold, Size: 10, Align: align.Right})),
+			col.New(2).Add(text.New(strings.ToUpper(r.Priority), props.Text{
+				Style: fontstyle.Bold, Size: 9, Align: align.Left,
+			})),
+			col.New(9).Add(text.New(fmt.Sprintf("$%.0f/mo savings", r.MonthlySavings), props.Text{
+				Size: 10, Align: align.Left,
+			})),
+		))
+		m.AddRows(row.New(14).Add(
+			col.New(1).Add(text.New("", props.Text{Size: 8})),
+			col.New(11).Add(text.New(r.Description, props.Text{Size: 10, Align: align.Left})),
+		))
+		m.AddRows(row.New(8).Add(
+			col.New(1).Add(text.New("", props.Text{Size: 8})),
+			col.New(11).Add(text.New(fmt.Sprintf("Category: %s | Current spend: $%.0f/mo | Payback: %d days",
+				strings.ReplaceAll(r.Category, "_", " "), r.CurrentCost, r.PaybackPeriodDays), props.Text{Size: 8, Align: align.Left})),
+		))
 		}
 		m.AddRow(10).Add(text.NewCol(12, "", props.Text{}))
 	}
@@ -183,19 +183,19 @@ func generatePDF(w http.ResponseWriter, report *engine.AssessmentReport) {
 		m.AddRows(row.New(10).Add(
 			col.New(3).Add(text.New("Model", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Left})),
 			col.New(2).Add(text.New("Provider", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Left})),
-			col.New(2).Add(text.New("Input (M tokens)", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Right})),
-			col.New(2).Add(text.New("Output (M tokens)", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Right})),
-			col.New(2).Add(text.New("Current/Mo", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Right})),
-			col.New(1).Add(text.New("Projected", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Right})),
+			col.New(3).Add(text.New("Input (M)", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Right})),
+			col.New(2).Add(text.New("Output (M)", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Right})),
+			col.New(1).Add(text.New("Cur/Mo", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Right})),
+			col.New(1).Add(text.New("Proj/Mo", props.Text{Style: fontstyle.Bold, Size: 8, Align: align.Right})),
 		))
 
 		for _, cp := range report.CostBreakdown {
 			m.AddRows(row.New(8).Add(
-				col.New(3).Add(text.New(cp.Model, props.Text{Size: 8})),
-				col.New(2).Add(text.New(cp.Provider, props.Text{Size: 8})),
-				col.New(2).Add(text.New(fmt.Sprintf("%.2f", cp.InputTokensMillions), props.Text{Size: 8, Align: align.Right})),
+				col.New(3).Add(text.New(cp.Model, props.Text{Size: 8, Align: align.Left})),
+				col.New(2).Add(text.New(cp.Provider, props.Text{Size: 8, Align: align.Left})),
+				col.New(3).Add(text.New(fmt.Sprintf("%.2f", cp.InputTokensMillions), props.Text{Size: 8, Align: align.Right})),
 				col.New(2).Add(text.New(fmt.Sprintf("%.2f", cp.OutputTokensMillions), props.Text{Size: 8, Align: align.Right})),
-				col.New(2).Add(text.New(fmt.Sprintf("$%.0f", cp.CurrentMonthlyCost), props.Text{Size: 8, Align: align.Right})),
+				col.New(1).Add(text.New(fmt.Sprintf("$%.0f", cp.CurrentMonthlyCost), props.Text{Size: 8, Align: align.Right})),
 				col.New(1).Add(text.New(fmt.Sprintf("$%.0f", cp.ProjectedMonthlyCost), props.Text{Size: 8, Align: align.Right})),
 			))
 		}
