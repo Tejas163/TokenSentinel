@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -14,7 +14,7 @@ import (
 
 func syncModelCatalogToRedis(ctx context.Context) {
 	if err := rdb.Ping(ctx).Err(); err != nil {
-		log.Printf("pricing: redis unavailable, skipping catalog sync: %v", err)
+		slog.Error("pricing: redis unavailable, skipping catalog sync", "err", err)
 		return
 	}
 	for _, m := range engine.ModelCatalog {
@@ -27,10 +27,10 @@ func syncModelCatalogToRedis(ctx context.Context) {
 			"output_price": m.OutputPrice,
 		}
 		if err := rdb.HSet(ctx, key, data).Err(); err != nil {
-			log.Printf("pricing: failed to sync %s: %v", m.Name, err)
+			slog.Error("pricing: failed to sync", "model", m.Name, "err", err)
 		}
 	}
-	log.Printf("pricing: synced %d models to redis", len(engine.ModelCatalog))
+	slog.Info("pricing: synced models to redis", "count", len(engine.ModelCatalog))
 }
 
 func findModelFromRedis(ctx context.Context, name string) *engine.ModelInfo {
@@ -166,7 +166,7 @@ func upsertPricing(w http.ResponseWriter, r *http.Request) {
 		"tier":         e.Tier,
 	}
 	if err := rdb.HSet(ctx, key, data).Err(); err != nil {
-		log.Printf("pricing: upsert failed for %s: %v", e.Name, err)
+		slog.Error("pricing: upsert failed", "name", e.Name, "err", err)
 		http.Error(w, "redis error", http.StatusInternalServerError)
 		return
 	}
@@ -189,7 +189,7 @@ func deletePricing(w http.ResponseWriter, r *http.Request) {
 
 	key := fmt.Sprintf("pricing:%s", strings.ToLower(name))
 	if err := rdb.Del(ctx, key).Err(); err != nil {
-		log.Printf("pricing: delete failed for %s: %v", name, err)
+		slog.Error("pricing: delete failed", "name", name, "err", err)
 		http.Error(w, "redis error", http.StatusInternalServerError)
 		return
 	}

@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -107,7 +107,7 @@ func listMonitoringRules(w http.ResponseWriter, r *http.Request) {
 			FROM monitoring_rules ORDER BY model LIMIT $1 OFFSET $2`, limit, offset)
 	}
 	if err != nil {
-		log.Printf("list monitoring rules error: %v", err)
+		slog.Error("list monitoring rules error", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -118,7 +118,7 @@ func listMonitoringRules(w http.ResponseWriter, r *http.Request) {
 		var rule MonitoringRule
 		var createdAt, updatedAt time.Time
 		if err := rows.Scan(&rule.ID, &rule.Model, &rule.PctThreshold, &rule.AbsThreshold, &rule.Period, &rule.Enabled, &rule.WebhookURL, &rule.EmailTo, &createdAt, &updatedAt); err != nil {
-			log.Printf("scan monitoring rule: %v", err)
+			slog.Error("scan monitoring rule", "err", err)
 			continue
 		}
 		rule.CreatedAt = createdAt.Format(time.RFC3339)
@@ -157,7 +157,7 @@ func createMonitoringRule(w http.ResponseWriter, r *http.Request) {
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
 		rule.Model, rule.PctThreshold, rule.AbsThreshold, rule.Period, rule.Enabled, rule.WebhookURL, rule.EmailTo, orgID).Scan(&id)
 	if err != nil {
-		log.Printf("create monitoring rule error: %v", err)
+		slog.Error("create monitoring rule error", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -166,7 +166,7 @@ func createMonitoringRule(w http.ResponseWriter, r *http.Request) {
 	rule.CreatedAt = time.Now().UTC().Format(time.RFC3339)
 	rule.UpdatedAt = rule.CreatedAt
 
-	log.Printf("audit: monitoring rule created id=%d model=%s from %s", id, rule.Model, r.RemoteAddr)
+	slog.Info("audit: monitoring rule created", "id", id, "model", rule.Model, "from", r.RemoteAddr)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(rule)
@@ -191,7 +191,7 @@ func getMonitoringRule(w http.ResponseWriter, r *http.Request, id int) {
 		return
 	}
 	if err != nil {
-		log.Printf("get monitoring rule error: %v", err)
+		slog.Error("get monitoring rule error", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -222,12 +222,12 @@ func updateMonitoringRule(w http.ResponseWriter, r *http.Request, id int) {
 			rule.Model, rule.PctThreshold, rule.AbsThreshold, rule.Period, rule.Enabled, rule.WebhookURL, rule.EmailTo, id)
 	}
 	if err != nil {
-		log.Printf("update monitoring rule error: %v", err)
+		slog.Error("update monitoring rule error", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	rule.ID = id
-	log.Printf("audit: monitoring rule updated id=%d from %s", id, r.RemoteAddr)
+	slog.Info("audit: monitoring rule updated", "id", id, "from", r.RemoteAddr)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(rule)
 }
@@ -242,7 +242,7 @@ func deleteMonitoringRule(w http.ResponseWriter, r *http.Request, id int) {
 		result, err = db.Exec(`DELETE FROM monitoring_rules WHERE id = $1`, id)
 	}
 	if err != nil {
-		log.Printf("delete monitoring rule error: %v", err)
+		slog.Error("delete monitoring rule error", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -251,7 +251,7 @@ func deleteMonitoringRule(w http.ResponseWriter, r *http.Request, id int) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	log.Printf("audit: monitoring rule deleted id=%d from %s", id, r.RemoteAddr)
+	slog.Info("audit: monitoring rule deleted", "id", id, "from", r.RemoteAddr)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -293,7 +293,7 @@ func handleAlerts(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := db.Query(query, args...)
 	if err != nil {
-		log.Printf("list alerts error: %v", err)
+		slog.Error("list alerts error", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -306,7 +306,7 @@ func handleAlerts(w http.ResponseWriter, r *http.Request) {
 		var acknowledgedAt, dismissedAt sql.NullTime
 		var createdAt time.Time
 		if err := rows.Scan(&a.ID, &monitoringRuleID, &a.Model, &a.AlertType, &a.Severity, &a.Message, &a.CurrentValue, &a.ThresholdValue, &acknowledgedAt, &dismissedAt, &createdAt); err != nil {
-			log.Printf("scan alert: %v", err)
+			slog.Error("scan alert", "err", err)
 			continue
 		}
 		if monitoringRuleID.Valid {
@@ -346,7 +346,7 @@ func acknowledgeAlert(w http.ResponseWriter, r *http.Request) {
 	}
 	_, err = db.Exec(`UPDATE alerts SET acknowledged_at = NOW() WHERE id = $1 AND acknowledged_at IS NULL`, id)
 	if err != nil {
-		log.Printf("acknowledge alert error: %v", err)
+		slog.Error("acknowledge alert error", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -371,7 +371,7 @@ func dismissAlert(w http.ResponseWriter, r *http.Request) {
 	}
 	_, err = db.Exec(`UPDATE alerts SET dismissed_at = NOW() WHERE id = $1 AND dismissed_at IS NULL`, id)
 	if err != nil {
-		log.Printf("dismiss alert error: %v", err)
+		slog.Error("dismiss alert error", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -389,7 +389,7 @@ func handleSavings(w http.ResponseWriter, r *http.Request) {
 		previous_monthly_cost, current_monthly_cost, estimated_monthly_savings, confidence, notes, created_at
 		FROM savings_events ORDER BY detected_at DESC LIMIT 100`)
 	if err != nil {
-		log.Printf("list savings error: %v", err)
+		slog.Error("list savings error", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -402,7 +402,7 @@ func handleSavings(w http.ResponseWriter, r *http.Request) {
 		var detectedAt, createdAt time.Time
 		if err := rows.Scan(&e.ID, &assessmentID, &recommendationID, &e.Model, &detectedAt, &e.DetectionMethod,
 			&e.PreviousMonthlyCost, &e.CurrentMonthlyCost, &e.EstimatedMonthlySavings, &e.Confidence, &e.Notes, &createdAt); err != nil {
-			log.Printf("scan savings event: %v", err)
+			slog.Error("scan savings event", "err", err)
 			continue
 		}
 		if assessmentID.Valid {
@@ -433,7 +433,7 @@ func handleTrends(w http.ResponseWriter, r *http.Request, model string) {
 	}
 	points, err := getTrendData(model, period)
 	if err != nil {
-		log.Printf("trend data error: %v", err)
+		slog.Error("trend data error", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}

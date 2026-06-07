@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -29,7 +29,7 @@ func initRateLimitConfig() {
 			adminRateWindow = d
 		}
 	}
-	log.Printf("rate limit: %d requests per %s", adminRateLimit, adminRateWindow)
+	slog.Info("rate limit config", "limit", adminRateLimit, "window", adminRateWindow)
 }
 
 func rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
@@ -47,7 +47,7 @@ func rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 		allowed, remaining, reset, err := checkRateLimit(r.Context(), key, r.URL.Path)
 		if err != nil {
-			log.Printf("rate limit check failed: %v", err)
+			slog.Error("rate limit check failed", "err", err)
 			next(w, r)
 			return
 		}

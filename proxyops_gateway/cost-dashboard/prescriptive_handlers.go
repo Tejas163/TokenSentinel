@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -182,7 +182,7 @@ func listAssessments(w http.ResponseWriter, r *http.Request) {
 			FROM assessments ORDER BY updated_at DESC LIMIT $1 OFFSET $2`, limit, offset)
 	}
 	if err != nil {
-		log.Printf("list assessments error: %v", err)
+		slog.Error("list assessments error", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -196,7 +196,7 @@ func listAssessments(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&a.ID, &a.OrgID, &a.CompanyName, &a.CloudVendor, &gpuJSON, &a.MonthlyRequestVolume,
 			&tokenJSON, &a.CurrentMonthlySpend, &providerJSON, &teamJSON, &a.Source,
 			&a.Currency, &a.FXRate, &a.Version, &createdAt, &updatedAt); err != nil {
-			log.Printf("scan assessment: %v", err)
+			slog.Error("scan assessment", "err", err)
 			continue
 		}
 		json.Unmarshal(gpuJSON, &a.GPUConfigs)
@@ -252,7 +252,7 @@ func createAssessment(w http.ResponseWriter, r *http.Request) {
 		a.EffectiveCurrency(), a.EffectiveFXRate(),
 	).Scan(&id)
 	if err != nil {
-		log.Printf("create assessment error: %v", err)
+		slog.Error("create assessment error", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -265,7 +265,7 @@ func createAssessment(w http.ResponseWriter, r *http.Request) {
 	db.Exec(`INSERT INTO assessment_versions (assessment_id, version_number, snapshot) VALUES ($1, 1, $2)`,
 		id, json.RawMessage(fmt.Sprintf(`{"id":%d}`, id)))
 
-	log.Printf("audit: assessment created id=%d company=%s from %s", id, a.CompanyName, r.RemoteAddr)
+	slog.Info("audit: assessment created", "id", id, "company", a.CompanyName, "remote", r.RemoteAddr)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(a)
@@ -288,7 +288,7 @@ func getAssessment(w http.ResponseWriter, r *http.Request, id int) {
 		return
 	}
 	if err != nil {
-		log.Printf("get assessment error: %v", err)
+		slog.Error("get assessment error", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -315,7 +315,7 @@ func updateAssessment(w http.ResponseWriter, r *http.Request, id int) {
 		return
 	}
 	if err != nil {
-		log.Printf("update assessment lookup error: %v", err)
+		slog.Error("update assessment lookup error", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -351,7 +351,7 @@ func updateAssessment(w http.ResponseWriter, r *http.Request, id int) {
 		tokenJSON, a.CurrentMonthlySpend, providerJSON, teamJSON, a.Source,
 		a.EffectiveCurrency(), a.EffectiveFXRate(), newVersion, id)
 	if err != nil {
-		log.Printf("update assessment error: %v", err)
+		slog.Error("update assessment error", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -361,7 +361,7 @@ func updateAssessment(w http.ResponseWriter, r *http.Request, id int) {
 
 	a.ID = id
 	a.Version = newVersion
-	log.Printf("audit: assessment updated id=%d version=%d from %s", id, newVersion, r.RemoteAddr)
+	slog.Info("audit: assessment updated", "id", id, "version", newVersion, "remote", r.RemoteAddr)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(a)
 }
@@ -369,7 +369,7 @@ func updateAssessment(w http.ResponseWriter, r *http.Request, id int) {
 func deleteAssessment(w http.ResponseWriter, r *http.Request, id int) {
 	result, err := db.Exec(`DELETE FROM assessments WHERE id = $1`, id)
 	if err != nil {
-		log.Printf("delete assessment error: %v", err)
+		slog.Error("delete assessment error", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -378,7 +378,7 @@ func deleteAssessment(w http.ResponseWriter, r *http.Request, id int) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	log.Printf("audit: assessment deleted id=%d from %s", id, r.RemoteAddr)
+	slog.Info("audit: assessment deleted", "id", id, "remote", r.RemoteAddr)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -388,7 +388,7 @@ func listAssessmentVersions(w http.ResponseWriter, r *http.Request, assessmentID
 	rows, err := db.Query(`SELECT id, assessment_id, version_number, snapshot, created_at
 		FROM assessment_versions WHERE assessment_id = $1 ORDER BY version_number DESC LIMIT $2 OFFSET $3`, assessmentID, limit, offset)
 	if err != nil {
-		log.Printf("list versions error: %v", err)
+		slog.Error("list versions error", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -399,7 +399,7 @@ func listAssessmentVersions(w http.ResponseWriter, r *http.Request, assessmentID
 		var v AssessmentVersion
 		var createdAt time.Time
 		if err := rows.Scan(&v.ID, &v.AssessmentID, &v.VersionNumber, &v.Snapshot, &createdAt); err != nil {
-			log.Printf("scan assessment version: %v", err)
+			slog.Error("scan assessment version", "err", err)
 			continue
 		}
 		v.CreatedAt = createdAt.Format(time.RFC3339)
@@ -421,7 +421,7 @@ func getAssessmentVersion(w http.ResponseWriter, r *http.Request, assessmentID, 
 		return
 	}
 	if err != nil {
-		log.Printf("get version error: %v", err)
+		slog.Error("get version error", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -448,11 +448,11 @@ func handleRunAssessment(w http.ResponseWriter, r *http.Request) {
 	}
 	report, err := engine.RunAssessment(appStore, id)
 	if err != nil {
-		log.Printf("run assessment error: %v", err)
+		slog.Error("run assessment error", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	log.Printf("audit: assessment run id=%d from %s", id, r.RemoteAddr)
+	slog.Info("audit: assessment run", "id", id, "remote", r.RemoteAddr)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(report)
 }
@@ -479,7 +479,7 @@ func handleWhatIf(w http.ResponseWriter, r *http.Request) {
 	}
 	projections, err := engine.RunWhatIf(appStore, id, adjustments)
 	if err != nil {
-		log.Printf("what-if error: %v", err)
+		slog.Error("what-if error", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -611,7 +611,7 @@ func listMarketplaceTemplates(w http.ResponseWriter, r *http.Request, orgID stri
 
 	rows, err = db.Query(query, args...)
 	if err != nil {
-		log.Printf("list marketplace error: %v", err)
+		slog.Error("list marketplace error", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -624,7 +624,7 @@ func listMarketplaceTemplates(w http.ResponseWriter, r *http.Request, orgID stri
 		var tags []string
 		var createdAt, updatedAt time.Time
 		if err := rows.Scan(&t.ID, &t.Name, &t.Description, &t.Category, &dataJSON, &tags, &t.DownloadCount, &createdAt, &updatedAt); err != nil {
-			log.Printf("scan marketplace template: %v", err)
+			slog.Error("scan marketplace template", "err", err)
 			continue
 		}
 		json.Unmarshal(dataJSON, &t.TemplateData)
@@ -676,7 +676,7 @@ func createMarketplaceTemplate(w http.ResponseWriter, r *http.Request, orgID str
 		orgID, t.Name, t.Description, t.Category, dataJSON, tagsArray,
 	).Scan(&id, &createdAt, &updatedAt)
 	if err != nil {
-		log.Printf("create marketplace template error: %v", err)
+		slog.Error("create marketplace template error", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -685,7 +685,7 @@ func createMarketplaceTemplate(w http.ResponseWriter, r *http.Request, orgID str
 	t.CreatedAt = createdAt.Format(time.RFC3339)
 	t.UpdatedAt = updatedAt.Format(time.RFC3339)
 
-	log.Printf("audit: marketplace template created id=%d name=%s from %s", id, t.Name, r.RemoteAddr)
+	slog.Info("audit: marketplace template created", "id", id, "name", t.Name, "remote", r.RemoteAddr)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(t)
@@ -737,7 +737,7 @@ func handleVariance(w http.ResponseWriter, r *http.Request, id int) {
 	}
 	entries, err := engine.CompareProjections(appStore, id, req.ActualCosts)
 	if err != nil {
-		log.Printf("variance error: %v", err)
+		slog.Error("variance error", "err", err)
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}

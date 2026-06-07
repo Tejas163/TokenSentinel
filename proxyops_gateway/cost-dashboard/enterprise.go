@@ -4,7 +4,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/smtp"
 	"net/http"
@@ -58,7 +58,7 @@ func handleEnterpriseInquiry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-		log.Printf("enterprise inquiry from %s <%s> at %s", inq.Name, inq.Email, inq.Company)
+		slog.Info("enterprise inquiry received", "name", inq.Name, "email", inq.Email, "company", inq.Company)
 
 	if emailCfg != nil {
 		subject := fmt.Sprintf("[TokenSentinel] Enterprise Inquiry from %s (%s)", inq.Name, inq.Company)
@@ -86,7 +86,7 @@ func handleEnterpriseInquiry(w http.ResponseWriter, r *http.Request) {
 					if err == nil {
 						w.Write([]byte(msg))
 						w.Close()
-						log.Printf("enterprise inquiry emailed to %s", enterpriseEmailTo)
+						slog.Info("enterprise inquiry emailed", "to", enterpriseEmailTo)
 					}
 					client.Quit()
 				}
@@ -94,13 +94,13 @@ func handleEnterpriseInquiry(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			if err := smtp.SendMail(addr, auth, emailCfg.FromAddr, []string{enterpriseEmailTo}, []byte(msg)); err != nil {
-				log.Printf("enterprise email send failed: %v", err)
+				slog.Error("enterprise email send failed", "err", err)
 			} else {
-				log.Printf("enterprise inquiry emailed to %s", enterpriseEmailTo)
+				slog.Info("enterprise inquiry emailed", "to", enterpriseEmailTo)
 			}
 		}
 	} else {
-		log.Printf("email not configured — enterprise inquiry received from %s <%s> at %s", inq.Name, inq.Email, inq.Company)
+		slog.Info("email not configured — enterprise inquiry received", "name", inq.Name, "email", inq.Email, "company", inq.Company)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

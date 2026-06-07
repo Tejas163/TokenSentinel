@@ -3,7 +3,7 @@ package main
 import (
 	"database/sql"
 	"fmt"
-	"log"
+	"log/slog"
 )
 
 func initPrescriptiveTables(db *sql.DB) error {
@@ -81,6 +81,6 @@ func initPrescriptiveTables(db *sql.DB) error {
 			return fmt.Errorf("prescriptive table init: %w", err)
 		}
 	}
-	log.Println("prescriptive tables initialized")
+	slog.Info("prescriptive tables initialized")
 	return nil
 }

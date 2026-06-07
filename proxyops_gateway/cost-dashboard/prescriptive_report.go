@@ -4,7 +4,7 @@ import (
 	"embed"
 	"encoding/json"
 	"html/template"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -23,7 +23,7 @@ func init() {
 func handleReport(w http.ResponseWriter, r *http.Request, id int) {
 	report, err := engine.GetReport(appStore, id)
 	if err != nil {
-		log.Printf("get report error: %v", err)
+		slog.Error("get report error", "err", err)
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}

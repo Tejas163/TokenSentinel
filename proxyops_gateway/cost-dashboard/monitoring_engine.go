@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"math"
 	"strings"
 	"time"
@@ -17,7 +17,7 @@ import (
 func monitorSpendTrends(ctx context.Context) {
 	ticker := time.NewTicker(monitoringInterval)
 	defer ticker.Stop()
-	log.Println("monitoring: spend trends goroutine started")
+	slog.Info("monitoring: spend trends goroutine started")
 	for {
 		select {
 		case <-ticker.C:
@@ -31,7 +31,7 @@ func monitorSpendTrends(ctx context.Context) {
 func trackSavings(ctx context.Context) {
 	ticker := time.NewTicker(monitoringInterval)
 	defer ticker.Stop()
-	log.Println("monitoring: savings tracking goroutine started")
+	slog.Info("monitoring: savings tracking goroutine started")
 	for {
 		select {
 		case <-ticker.C:
@@ -45,7 +45,7 @@ func trackSavings(ctx context.Context) {
 func sendAlerts(ctx context.Context) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-	log.Println("monitoring: alert dispatch goroutine started")
+	slog.Info("monitoring: alert dispatch goroutine started")
 	for {
 		select {
 		case <-ticker.C:
@@ -113,7 +113,7 @@ func queryModelCosts(since string) map[string]float64 {
 		var model string
 		var totalIn, totalOut float64
 		if err := rows.Scan(&model, &totalIn, &totalOut); err != nil {
-			log.Printf("scan model costs: %v", err)
+			slog.Error("scan model costs", "err", err)
 			continue
 		}
 		cost := (totalIn/1000)*30 + (totalOut/1000)*60
@@ -190,10 +190,10 @@ func createAlert(model, alertType, severity, message string, currentValue, thres
 	_, err := db.Exec(`INSERT INTO alerts (model, alert_type, severity, message, current_value, threshold_value) VALUES ($1,$2,$3,$4,$5,$6)`,
 		model, alertType, severity, message, currentValue, thresholdValue)
 	if err != nil {
-		log.Printf("monitoring: failed to create alert: %v", err)
+		slog.Error("monitoring: failed to create alert", "err", err)
 		return
 	}
-	log.Printf("monitoring: alert created type=%s model=%s severity=%s", alertType, model, severity)
+	slog.Info("monitoring: alert created", "type", alertType, "model", model, "severity", severity)
 }
 
 func detectSavings() {
@@ -230,7 +230,7 @@ func detectSavings() {
 				VALUES ($1,'cost_drop',$2,$3,$4,'high',$5)`,
 				mi.Name, priorCost, recentCost, savings, notes)
 			if err != nil {
-				log.Printf("monitoring: failed to create savings event: %v", err)
+				slog.Error("monitoring: failed to create savings event", "err", err)
 				continue
 			}
 			createAlert(mi.Name, "savings_opportunity", "info",
@@ -253,7 +253,7 @@ func dispatchPendingAlerts() {
 		var a Alert
 		var createdAt time.Time
 		if err := rows.Scan(&a.ID, &a.Model, &a.AlertType, &a.Severity, &a.Message, &a.CurrentValue, &a.ThresholdValue, &createdAt); err != nil {
-			log.Printf("scan pending alert: %v", err)
+			slog.Error("scan pending alert", "err", err)
 			continue
 		}
 		dispatchAlert(a)
@@ -274,11 +274,11 @@ func dispatchAlert(a Alert) {
 			"timestamp": time.Now().UTC().Format(time.RFC3339),
 		})
 		if err != nil {
-			log.Printf("alert webhook marshal: %v", err)
+			slog.Error("alert webhook marshal", "err", err)
 		} else {
 			resp, err := signAndPost(rule.WebhookURL, payload)
 			if err != nil {
-				log.Printf("monitoring: webhook dispatch failed for alert %d: %v", a.ID, err)
+				slog.Error("monitoring: webhook dispatch failed", "alert_id", a.ID, "err", err)
 			} else {
 				io.Copy(io.Discard, resp.Body)
 				resp.Body.Close()
@@ -300,7 +300,7 @@ func dispatchAlert(a Alert) {
 		"threshold": a.ThresholdValue,
 	})
 	if err != nil {
-		log.Printf("alert SSE marshal: %v", err)
+		slog.Error("alert SSE marshal", "err", err)
 	} else {
 		events.broadcast(sseEvent{Type: "alert", Data: payload})
 	}
@@ -327,7 +327,7 @@ func getTrendData(model, period string) ([]SpendTrendPoint, error) {
 		var day time.Time
 		var totalTokens, totalIn, totalOut float64
 		if err := rows.Scan(&day, &totalTokens, &totalIn, &totalOut); err != nil {
-			log.Printf("scan trend data: %v", err)
+			slog.Error("scan trend data", "err", err)
 			continue
 		}
 		mi := engine.FindModel(model)

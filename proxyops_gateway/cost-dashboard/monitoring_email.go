@@ -3,7 +3,7 @@ package main
 import (
 	"crypto/tls"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/smtp"
 	"os"
@@ -73,13 +73,13 @@ TokenSentinel Continuous Optimization
 		tlsCfg := &tls.Config{ServerName: emailCfg.SMTPHost}
 		conn, err := tls.Dial("tcp", addr, tlsCfg)
 		if err != nil {
-			log.Printf("email: tls dial failed: %v", err)
+			slog.Error("email: tls dial failed", "err", err)
 			return
 		}
 		client, err := smtp.NewClient(conn, emailCfg.SMTPHost)
 		if err != nil {
 			conn.Close()
-			log.Printf("email: new client failed: %v", err)
+			slog.Error("email: new client failed", "err", err)
 			return
 		}
 		defer client.Close()
@@ -90,16 +90,16 @@ TokenSentinel Continuous Optimization
 		client.Rcpt(to)
 		w, err := client.Data()
 		if err != nil {
-			log.Printf("email: data failed: %v", err)
+			slog.Error("email: data failed", "err", err)
 			return
 		}
 		w.Write([]byte(msg))
 		w.Close()
 	} else {
 		if err := smtp.SendMail(addr, auth, emailCfg.FromAddr, []string{to}, []byte(msg)); err != nil {
-			log.Printf("email: send failed to %s: %v", to, err)
+			slog.Error("email: send failed", "to", to, "err", err)
 			return
 		}
 	}
-	log.Printf("email: alert sent to %s", to)
+	slog.Info("email: alert sent", "to", to)
 }

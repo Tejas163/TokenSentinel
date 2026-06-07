@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/csv"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -35,7 +35,7 @@ func handleReportDownload(w http.ResponseWriter, r *http.Request, id int, format
 func exportCSV(w http.ResponseWriter, assessmentID int) {
 	report, err := engine.GetReport(appStore, assessmentID)
 	if err != nil {
-		log.Printf("csv export: %v", err)
+		slog.Error("csv export", "err", err)
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
@@ -107,7 +107,7 @@ func exportCSV(w http.ResponseWriter, assessmentID int) {
 func exportPDF(w http.ResponseWriter, assessmentID int) {
 	report, err := engine.GetReport(appStore, assessmentID)
 	if err != nil {
-		log.Printf("pdf export: %v", err)
+		slog.Error("pdf export", "err", err)
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
@@ -231,7 +231,7 @@ func generatePDF(w http.ResponseWriter, report *engine.AssessmentReport) {
 
 	document, err := m.Generate()
 	if err != nil {
-		log.Printf("pdf generation error: %v", err)
+		slog.Error("pdf generation error", "err", err)
 		http.Error(w, "pdf generation failed", http.StatusInternalServerError)
 		return
 	}

@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -85,7 +85,7 @@ func handlePlaygroundSend(w http.ResponseWriter, r *http.Request) {
 		requestID, req.Model, req.InputTokens, req.OutputTokens, ts, team,
 	)
 	if err != nil {
-		log.Printf("playground: insert error: %v", err)
+		slog.Error("playground: insert error", "err", err)
 		http.Error(w, fmt.Sprintf("insert error: %v", err), http.StatusInternalServerError)
 		return
 	}

@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"math/rand"
 	"net/http"
 	"strings"
@@ -92,21 +92,20 @@ func handleAdminSeed(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("insert assessment: %v", err), http.StatusInternalServerError)
 			return
 		}
-		log.Printf("seed: created assessment id=%d", aid)
+		slog.Info("seed: created assessment", "id", aid)
 	}
 
 	// Run prescriptive engine (re-runs if already exists, clearing stale data)
 	report, err := engine.RunAssessment(appStore, aid)
 	if err != nil {
-		log.Printf("seed: run assessment error: %v", err)
+		slog.Error("seed: run assessment", "err", err)
 	} else {
-		log.Printf("seed: engine done — $%.0f current, $%.0f savings, %d recs",
-			report.TotalCurrent, report.TotalSavings, len(report.Recommendations))
+		slog.Info("seed: engine done", "current", report.TotalCurrent, "savings", report.TotalSavings, "recommendations", len(report.Recommendations))
 	}
 
 	// Seed cost entries (past 7 days, 3-5 per hour)
 	entries := seedCostEntries(db)
-	log.Printf("seed: added %d cost entries", entries)
+	slog.Info("seed: added cost entries", "count", entries)
 
 	// Create monitoring rule
 	var ruleID int
@@ -118,9 +117,9 @@ func handleAdminSeed(w http.ResponseWriter, r *http.Request) {
 		_, err := db.Exec(`INSERT INTO monitoring_rules (model, pct_threshold, abs_threshold, period, enabled)
 			VALUES ('*', 20, 100, '7d', true)`)
 		if err != nil {
-			log.Printf("seed: create monitoring rule error: %v", err)
+			slog.Error("seed: create monitoring rule", "err", err)
 		} else {
-			log.Printf("seed: created monitoring rule")
+			slog.Info("seed: created monitoring rule")
 		}
 	}
 
@@ -134,9 +133,9 @@ func handleAdminSeed(w http.ResponseWriter, r *http.Request) {
 		_, err := db.Exec(`INSERT INTO budget_rules (model, max_tokens, period, enabled)
 			VALUES ('*', 15000000, '30d', true)`)
 		if err != nil {
-			log.Printf("seed: create budget rule error: %v", err)
+			slog.Error("seed: create budget rule", "err", err)
 		} else {
-			log.Printf("seed: created budget rule")
+			slog.Info("seed: created budget rule")
 		}
 	}
 
@@ -228,7 +227,7 @@ func seedCostEntries(db *sql.DB) int {
 
 	_, err := db.Exec(buf.String(), args...)
 	if err != nil {
-		log.Printf("seed batch insert error: %v", err)
+		slog.Error("seed batch insert", "err", err)
 	}
 	return len(rows)
 }

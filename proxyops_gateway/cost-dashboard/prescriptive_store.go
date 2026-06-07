@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/proxyops/internal/engine"
@@ -34,16 +34,16 @@ func (s *pgStore) GetAssessment(id int) (*engine.Assessment, error) {
 	}
 
 	if err := json.Unmarshal(gpuJSON, &a.GPUConfigs); err != nil {
-		log.Printf("unmarshal gpu_configs for assessment %d: %v", id, err)
+		slog.Error("unmarshal gpu_configs for assessment", "id", id, "err", err)
 	}
 	if err := json.Unmarshal(tokenJSON, &a.TokenDistribution); err != nil {
-		log.Printf("unmarshal token_distribution for assessment %d: %v", id, err)
+		slog.Error("unmarshal token_distribution for assessment", "id", id, "err", err)
 	}
 	if err := json.Unmarshal(providerJSON, &a.ProvidersUsed); err != nil {
-		log.Printf("unmarshal providers_used for assessment %d: %v", id, err)
+		slog.Error("unmarshal providers_used for assessment", "id", id, "err", err)
 	}
 	if err := json.Unmarshal(teamJSON, &a.TeamComposition); err != nil {
-		log.Printf("unmarshal team_composition for assessment %d: %v", id, err)
+		slog.Error("unmarshal team_composition for assessment", "id", id, "err", err)
 	}
 	a.CreatedAt = createdAt.Format(time.RFC3339)
 	a.UpdatedAt = updatedAt.Format(time.RFC3339)
@@ -64,7 +64,7 @@ func (s *pgStore) QueryLiveCostData(since time.Time) (*engine.AssessmentLiveData
 		var model string
 		var inputSum, outputSum, count int64
 		if err := rows.Scan(&model, &inputSum, &outputSum, &count); err != nil {
-			log.Printf("scan live cost data: %v", err)
+			slog.Error("scan live cost data", "err", err)
 			continue
 		}
 		ld.Models[model] = &engine.ModelUsage{
@@ -121,7 +121,7 @@ func (s *pgStore) GetCostProjections(assessmentID int, scenario string) ([]engin
 	for rows.Next() {
 		var cp engine.CostProjection
 		if err := rows.Scan(&cp.Model, &cp.Provider, &cp.CurrentMonthlyCost, &cp.ProjectedMonthlyCost, &cp.InputTokensMillions, &cp.OutputTokensMillions); err != nil {
-			log.Printf("scan cost projection: %v", err)
+			slog.Error("scan cost projection", "err", err)
 			continue
 		}
 		cp.Scenario = scenario
@@ -145,7 +145,7 @@ func (s *pgStore) GetRecommendations(assessmentID int) ([]engine.Recommendation,
 		var r engine.Recommendation
 		var createdAt time.Time
 		if err := rows.Scan(&r.ID, &r.Category, &r.Description, &r.CurrentCost, &r.ProjectedCost, &r.MonthlySavings, &r.PaybackPeriodDays, &r.Priority, &createdAt); err != nil {
-			log.Printf("scan recommendation: %v", err)
+			slog.Error("scan recommendation", "err", err)
 			continue
 		}
 		r.AssessmentID = assessmentID

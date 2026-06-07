@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
-	"log"
+	"log/slog"
 	"math"
 	"net/http"
 	"os"
@@ -37,6 +37,11 @@ var enterpriseHTML embed.FS
 //go:embed static/styles.css
 var staticCSS embed.FS
 
+func fatal(msg string, err error) {
+	slog.Error(msg, "err", err)
+	os.Exit(1)
+}
+
 func parseIntParam(r *http.Request, key string, defaultVal int) int {
 	v := r.URL.Query().Get(key)
 	if v == "" {
@@ -53,9 +58,9 @@ func lookupEnv(key, fallback string) string {
 	v := os.Getenv(key)
 	if v == "" {
 		if fallback == "" {
-			log.Fatalf("required env var %q is not set", key)
+			fatal("required env var not set", fmt.Errorf("key=%s", key))
 		}
-		log.Printf("env %q not set, using default: %s", key, fallback)
+		slog.Info("env not set, using default", "key", key, "fallback", fallback)
 		return fallback
 	}
 	return v
@@ -87,8 +92,8 @@ func newSSEBroker() *sseBroker {
 func (b *sseBroker) broadcast(evt sseEvent) {
 	select {
 	case b.broad <- evt:
-	default:
-		log.Printf("sse: broker channel full, dropping %s event", evt.Type)
+		default:
+		slog.Warn("sse: broker channel full, dropping event", "type", evt.Type)
 	}
 }
 
@@ -208,6 +213,8 @@ type ModelCost struct {
 }
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo, AddSource: true})))
+
 	redisAddr := lookupEnv("REDIS_ADDR", "localhost:6379")
 	dsn := lookupEnv("DATABASE_URL", "postgres://localhost:5432/cost_dashboard?sslmode=disable")
 	port := lookupEnv("PORT", "3001")
@@ -236,16 +243,16 @@ func main() {
 	var err error
 	db, err = sql.Open("pgx", dsn)
 	if err != nil {
-		log.Fatalf("failed to open postgres: %v", err)
+		fatal("failed to open postgres", err)
 	}
 	if err = initDB(); err != nil {
-		log.Fatalf("failed to init db: %v", err)
+		fatal("failed to init db", err)
 	}
 	if err = initPrescriptiveTables(db); err != nil {
-		log.Fatalf("failed to init prescriptive tables: %v", err)
+		fatal("failed to init prescriptive tables", err)
 	}
 	if err = initMonitoringTables(db); err != nil {
-		log.Fatalf("failed to init monitoring tables: %v", err)
+		fatal("failed to init monitoring tables", err)
 	}
 
 	rdb = redis.NewClient(&redis.Options{
@@ -327,23 +334,23 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		log.Printf("Cost dashboard starting on :%s...", port)
+		slog.Info("server starting", "port", port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("server error: %v", err)
+			fatal("server error", err)
 		}
 	}()
 
 	sig := <-quit
-	log.Printf("received signal %v, shutting down...", sig)
+	slog.Info("shutting down", "signal", sig)
 	cancel()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Fatalf("server forced shutdown: %v", err)
+		fatal("server forced shutdown", err)
 	}
-	log.Println("server stopped")
+	slog.Info("server stopped")
 }
 
 func initDB() error {
@@ -495,18 +502,18 @@ func dataRetention(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
-			result, err := db.Exec(`DELETE FROM cost_entries WHERE timestamp < NOW() - $1::interval`, fmt.Sprintf("%d days", retentionMaxAge))
-			if err != nil {
-				log.Printf("data retention cost prune failed: %v", err)
-			} else if n, _ := result.RowsAffected(); n > 0 {
-				log.Printf("data retention pruned %d cost entries older than %d days", n, retentionMaxAge)
-			}
-			result, err = db.Exec(`DELETE FROM anomalies WHERE detected_at < NOW() - $1::interval`, fmt.Sprintf("%d days", retentionMaxAge))
-			if err != nil {
-				log.Printf("data retention anomaly prune failed: %v", err)
-			} else if n, _ := result.RowsAffected(); n > 0 {
-				log.Printf("data retention pruned %d anomalies older than %d days", n, retentionMaxAge)
-			}
+		result, err := db.Exec(`DELETE FROM cost_entries WHERE timestamp < NOW() - $1::interval`, fmt.Sprintf("%d days", retentionMaxAge))
+		if err != nil {
+			slog.Error("data retention cost prune failed", "err", err)
+		} else if n, _ := result.RowsAffected(); n > 0 {
+			slog.Info("data retention pruned cost entries", "count", n, "maxAgeDays", retentionMaxAge)
+		}
+		result, err = db.Exec(`DELETE FROM anomalies WHERE detected_at < NOW() - $1::interval`, fmt.Sprintf("%d days", retentionMaxAge))
+		if err != nil {
+			slog.Error("data retention anomaly prune failed", "err", err)
+		} else if n, _ := result.RowsAffected(); n > 0 {
+			slog.Info("data retention pruned anomalies", "count", n, "maxAgeDays", retentionMaxAge)
+		}
 		case <-ctx.Done():
 			return
 		}
@@ -574,7 +581,7 @@ func runCostSummaryRefresh() {
 			total_output = EXCLUDED.total_output,
 			request_count = EXCLUDED.request_count`)
 	if err != nil {
-		log.Printf("refresh cost summary: %v", err)
+		slog.Error("refresh cost summary", "err", err)
 	}
 }
 
@@ -595,7 +602,7 @@ func checkAndEscalate(ctx context.Context) {
 	policies, err := db.Query(`SELECT id, name, alert_type, model, severity, timeout_minutes, webhook_url, org_id
 		FROM escalation_policies WHERE enabled = true`)
 	if err != nil {
-		log.Printf("escalation policies query: %v", err)
+		slog.Error("escalation policies query", "err", err)
 		return
 	}
 	defer policies.Close()
@@ -614,7 +621,7 @@ func checkAndEscalate(ctx context.Context) {
 	for policies.Next() {
 		var p policy
 		if err := policies.Scan(&p.id, &p.name, &p.alertType, &p.model, &p.severity, &p.timeoutMinutes, &p.webhookURL, &p.orgID); err != nil {
-			log.Printf("scan escalation policy: %v", err)
+			slog.Error("scan escalation policy", "err", err)
 			continue
 		}
 		matched = append(matched, p)
@@ -653,14 +660,14 @@ func checkAndEscalate(ctx context.Context) {
 
 		rows, err := db.Query(query, args...)
 		if err != nil {
-			log.Printf("escalation alert query (policy=%s): %v", p.name, err)
+			slog.Error("escalation alert query", "policy", p.name, "err", err)
 			continue
 		}
 		for rows.Next() {
 			var alertID int
 			var model, alertType, message string
 			if err := rows.Scan(&alertID, &model, &alertType, &message); err != nil {
-				log.Printf("scan alert for escalation: %v", err)
+				slog.Error("scan alert for escalation", "err", err)
 				continue
 			}
 			payload, _ := json.Marshal(map[string]interface{}{
@@ -672,13 +679,13 @@ func checkAndEscalate(ctx context.Context) {
 			})
 			resp, err := webhookClient.Post(p.webhookURL, "application/json", bytes.NewReader(payload))
 			if err != nil {
-				log.Printf("escalation webhook (policy=%s, alert=%d): %v", p.name, alertID, err)
+				slog.Error("escalation webhook", "policy", p.name, "alertID", alertID, "err", err)
 				continue
 			}
 			io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 			db.Exec(`UPDATE alerts SET escalated_at = NOW() WHERE id = $1`, alertID)
-			log.Printf("escalation triggered policy=%s alert=%d url=%s", p.name, alertID, p.webhookURL)
+			slog.Info("escalation triggered", "policy", p.name, "alertID", alertID, "url", p.webhookURL)
 		}
 		rows.Close()
 	}
@@ -693,7 +700,7 @@ func detectAnomalies(ctx context.Context) {
 			sinceStr := time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339)
 			entries, err := queryAnomalies(sinceStr)
 			if err != nil {
-				log.Printf("detect anomalies: %v", err)
+				slog.Error("detect anomalies", "err", err)
 				continue
 			}
 			for _, a := range entries {
@@ -701,14 +708,14 @@ func detectAnomalies(ctx context.Context) {
 					VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (request_id) DO NOTHING`,
 					a.RequestID, a.Model, a.TotalTokens, a.Mean, a.Stddev, a.ZScore, a.OrgID)
 				if err != nil {
-					log.Printf("persist anomaly: %v", err)
+					slog.Error("persist anomaly", "err", err)
 				}
 				data, err := json.Marshal(a)
 				if err != nil {
-					log.Printf("anomaly marshal: %v", err)
+					slog.Error("anomaly marshal", "err", err)
 					continue
 				}
-				log.Printf("ANOMALY: %s", data)
+				slog.Warn("anomaly detected", "request_id", a.RequestID, "model", a.Model, "z_score", a.ZScore)
 				rdb.Publish(ctx, "anomaly:events", string(data))
 				events.broadcast(sseEvent{Type: "anomaly", Data: data})
 			}
@@ -732,7 +739,7 @@ func handleAnomalies(w http.ResponseWriter, r *http.Request) {
 		sinceStr := time.Now().UTC().Add(-since).Format(time.RFC3339)
 		results, err := queryAnomalies(sinceStr)
 		if err != nil {
-			log.Printf("anomalies handler: %v", err)
+			slog.Error("anomalies handler", "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -766,7 +773,7 @@ func handleAnomalies(w http.ResponseWriter, r *http.Request) {
 			FROM anomalies WHERE detected_at >= $1 ORDER BY detected_at DESC LIMIT $2 OFFSET $3`, sinceStr, limit, offset)
 	}
 	if err != nil {
-		log.Printf("anomalies history query: %v", err)
+		slog.Error("anomalies history query", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -777,7 +784,7 @@ func handleAnomalies(w http.ResponseWriter, r *http.Request) {
 		var a AnomalyEntry
 		var detectedAt time.Time
 		if err := rows.Scan(&a.ID, &a.RequestID, &a.Model, &a.TotalTokens, &a.Mean, &a.Stddev, &a.ZScore, &detectedAt); err != nil {
-			log.Printf("scan anomaly: %v", err)
+			slog.Error("scan anomaly", "err", err)
 			continue
 		}
 		a.DetectedAt = detectedAt.Format(time.RFC3339)
@@ -793,7 +800,7 @@ func replayMissedCostEvents(ctx context.Context) {
 	for {
 		keys, nextCursor, err := rdb.Scan(ctx, cursor, "sentinel:*:cost", 100).Result()
 		if err != nil {
-			log.Printf("failed to scan cost keys for replay: %v", err)
+			slog.Error("failed to scan cost keys for replay", "err", err)
 			return
 		}
 		for _, key := range keys {
@@ -830,7 +837,7 @@ func ingestCost(ctx context.Context, reqID string) {
 		return
 	}
 	if err != nil {
-		log.Printf("failed to read cost key %s: %v", costKey, err)
+		slog.Error("failed to read cost key", "key", costKey, "err", err)
 		return
 	}
 
@@ -842,7 +849,7 @@ func ingestCost(ctx context.Context, reqID string) {
 		Team         string `json:"team"`
 	}
 	if err := json.Unmarshal([]byte(data), &entry); err != nil {
-		log.Printf("failed to parse cost data for %s: %v", reqID, err)
+		slog.Error("failed to parse cost data", "request_id", reqID, "err", err)
 		return
 	}
 
@@ -855,7 +862,7 @@ func ingestCost(ctx context.Context, reqID string) {
 		reqID, entry.Model, entry.InputTokens, entry.OutputTokens, entry.Timestamp, entry.Team,
 	)
 	if err != nil {
-		log.Printf("failed to insert cost entry %s: %v", reqID, err)
+		slog.Error("failed to insert cost entry", "request_id", reqID, "err", err)
 		return
 	}
 	n, _ := result.RowsAffected()
@@ -869,7 +876,7 @@ func ingestCost(ctx context.Context, reqID string) {
 			"team":          entry.Team,
 		})
 		if err != nil {
-			log.Printf("ingest marshal: %v", err)
+			slog.Error("ingest marshal", "err", err)
 		} else {
 			events.broadcast(sseEvent{Type: "cost", Data: data})
 		}
@@ -923,7 +930,7 @@ func handleCosts(w http.ResponseWriter, r *http.Request) {
 			)
 		}
 		if err != nil {
-			log.Printf("costs aggregated query error: %v", err)
+			slog.Error("costs aggregated query error", "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -931,7 +938,7 @@ func handleCosts(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var mc ModelCost
 			if err := rows.Scan(&mc.Model, &mc.TotalTokens, &mc.TotalInput, &mc.TotalOutput, &mc.RequestCount); err != nil {
-				log.Printf("scan aggregated cost row: %v", err)
+				slog.Error("scan aggregated cost row", "err", err)
 				continue
 			}
 			if mc.RequestCount > 0 {
@@ -962,7 +969,7 @@ func handleCosts(w http.ResponseWriter, r *http.Request) {
 			)
 		}
 		if err != nil {
-			log.Printf("costs query error: %v", err)
+			slog.Error("costs query error", "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -970,7 +977,7 @@ func handleCosts(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var mc ModelCost
 			if err := rows.Scan(&mc.Model, &mc.TotalTokens, &mc.TotalInput, &mc.TotalOutput, &mc.RequestCount); err != nil {
-				log.Printf("scan cost row: %v", err)
+				slog.Error("scan cost row", "err", err)
 				continue
 			}
 			if mc.RequestCount > 0 {
@@ -1038,7 +1045,7 @@ func handleSummary(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 	if err := row.Scan(&summary.TotalRequests, &summary.TotalTokens, &summary.TotalInput, &summary.TotalOutput, &summary.UniqueModels); err != nil {
-		log.Printf("summary query error: %v", err)
+		slog.Error("summary query error", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -1084,7 +1091,7 @@ func handleCostTimeSeries(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := db.Query(query, args...)
 	if err != nil {
-		log.Printf("cost timeseries query error: %v", err)
+		slog.Error("cost timeseries query error", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
@@ -1096,7 +1103,7 @@ func handleCostTimeSeries(w http.ResponseWriter, r *http.Request) {
 		var model string
 		var totalTokens, totalInput, totalOutput int64
 		if err := rows.Scan(&hour, &model, &totalTokens, &totalInput, &totalOutput); err != nil {
-			log.Printf("scan cost timeseries row: %v", err)
+			slog.Error("scan cost timeseries row", "err", err)
 			continue
 		}
 		price := modelPrice(model)
@@ -1176,7 +1183,7 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			key = r.URL.Query().Get("api_key")
 		}
 		if key == "" || key != authAPIKey {
-			log.Printf("auth failure: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+			slog.Warn("auth failure", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -1307,15 +1314,15 @@ func checkBudgets(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
-			rows, err := db.Query(`SELECT id, model, max_tokens, period, webhook_url FROM budget_rules WHERE enabled = true`)
-			if err != nil {
-				log.Printf("budget rules query failed: %v", err)
-				continue
-			}
-			for rows.Next() {
-				var r BudgetRule
-				if err := rows.Scan(&r.ID, &r.Model, &r.MaxTokens, &r.Period, &r.WebhookURL); err != nil {
-					log.Printf("scan budget rule row: %v", err)
+		rows, err := db.Query(`SELECT id, model, max_tokens, period, webhook_url FROM budget_rules WHERE enabled = true`)
+		if err != nil {
+			slog.Error("budget rules query failed", "err", err)
+			continue
+		}
+		for rows.Next() {
+			var r BudgetRule
+			if err := rows.Scan(&r.ID, &r.Model, &r.MaxTokens, &r.Period, &r.WebhookURL); err != nil {
+				slog.Error("scan budget rule row", "err", err)
 					continue
 				}
 				since, parseErr := time.ParseDuration(r.Period)
@@ -1351,27 +1358,27 @@ func checkBudgets(ctx context.Context) {
 						continue
 					}
 
-				payload, err := json.Marshal(map[string]interface{}{
-						"rule_id":      r.ID,
-						"model":        r.Model,
-						"period":       r.Period,
-						"total_tokens": totalTokens.Int64,
-						"max_tokens":   r.MaxTokens,
-						"exceeded_by":  totalTokens.Int64 - r.MaxTokens,
-						"checked_at":   time.Now().UTC().Format(time.RFC3339),
-					})
-					if err != nil {
-						log.Printf("budget webhook marshal: %v", err)
-						continue
-					}
-					resp, postErr := signAndPost(r.WebhookURL, payload)
-					if postErr != nil {
-						log.Printf("budget webhook post error: %v", postErr)
-						continue
-					}
-					io.Copy(io.Discard, resp.Body)
-					resp.Body.Close()
-					log.Printf("budget alert fired for rule %d -> %s (signed)", r.ID, r.WebhookURL)
+			payload, err := json.Marshal(map[string]interface{}{
+					"rule_id":      r.ID,
+					"model":        r.Model,
+					"period":       r.Period,
+					"total_tokens": totalTokens.Int64,
+					"max_tokens":   r.MaxTokens,
+					"exceeded_by":  totalTokens.Int64 - r.MaxTokens,
+					"checked_at":   time.Now().UTC().Format(time.RFC3339),
+				})
+				if err != nil {
+					slog.Error("budget webhook marshal", "err", err)
+					continue
+				}
+				resp, postErr := signAndPost(r.WebhookURL, payload)
+				if postErr != nil {
+					slog.Error("budget webhook post error", "err", postErr)
+					continue
+				}
+				io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
+				slog.Info("budget alert fired", "rule_id", r.ID, "webhook_url", r.WebhookURL)
 				}
 			}
 			rows.Close()
@@ -1395,7 +1402,7 @@ func handleBudgetRules(w http.ResponseWriter, r *http.Request) {
 			rows, err = db.Query(`SELECT id, model, max_tokens, period, webhook_url, enabled FROM budget_rules ORDER BY id LIMIT $1 OFFSET $2`, limit, offset)
 		}
 		if err != nil {
-			log.Printf("budget rules query error: %v", err)
+			slog.Error("budget rules query error", "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -1404,7 +1411,7 @@ func handleBudgetRules(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var br BudgetRule
 			if err := rows.Scan(&br.ID, &br.Model, &br.MaxTokens, &br.Period, &br.WebhookURL, &br.Enabled); err != nil {
-				log.Printf("scan budget rules list: %v", err)
+				slog.Error("scan budget rules list", "err", err)
 				continue
 			}
 			rules = append(rules, br)
@@ -1430,11 +1437,11 @@ func handleBudgetRules(w http.ResponseWriter, r *http.Request) {
 			br.Model, br.MaxTokens, br.Period, br.WebhookURL, orgID,
 		).Scan(&br.ID, &br.Enabled)
 		if err != nil {
-			log.Printf("budget rules insert error: %v", err)
+			slog.Error("budget rules insert error", "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		log.Printf("audit: budget rule created id=%d model=%s from %s", br.ID, br.Model, r.RemoteAddr)
+		slog.Info("audit: budget rule created", "id", br.ID, "model", br.Model, "remote", r.RemoteAddr)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(br)
@@ -1452,11 +1459,11 @@ func handleBudgetRules(w http.ResponseWriter, r *http.Request) {
 			_, err = db.Exec(`DELETE FROM budget_rules WHERE id = $1`, id)
 		}
 		if err != nil {
-			log.Printf("budget rules delete error: %v", err)
+			slog.Error("budget rules delete error", "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		log.Printf("audit: budget rule deleted id=%d from %s", id, r.RemoteAddr)
+		slog.Info("audit: budget rule deleted", "id", id, "remote", r.RemoteAddr)
 		w.WriteHeader(http.StatusNoContent)
 
 	default:
@@ -1475,7 +1482,7 @@ func costDigest(ctx context.Context) {
 	}
 	interval, err := time.ParseDuration(schedule)
 	if err != nil {
-		log.Printf("invalid DIGEST_SCHEDULE %q, defaulting to 24h", schedule)
+		slog.Warn("invalid DIGEST_SCHEDULE, defaulting to 24h", "value", schedule)
 		interval = 24 * time.Hour
 	}
 
@@ -1493,7 +1500,7 @@ func costDigest(ctx context.Context) {
 				sinceStr,
 			)
 			if err != nil {
-				log.Printf("digest query failed: %v", err)
+				slog.Error("digest query failed", "err", err)
 				continue
 			}
 
@@ -1503,7 +1510,7 @@ func costDigest(ctx context.Context) {
 				var model string
 				var total, inp, out, count int64
 				if err := rows.Scan(&model, &total, &inp, &out, &count); err != nil {
-					log.Printf("scan digest row: %v", err)
+					slog.Error("scan digest row", "err", err)
 					continue
 				}
 				totalTokens += total
@@ -1528,17 +1535,17 @@ func costDigest(ctx context.Context) {
 			}
 			data, err := json.Marshal(payload)
 			if err != nil {
-				log.Printf("digest marshal: %v", err)
+				slog.Error("digest marshal", "err", err)
 				continue
 			}
 			resp, err := signAndPost(webhookURL, data)
 			if err != nil {
-				log.Printf("digest webhook failed: %v", err)
+				slog.Error("digest webhook failed", "err", err)
 				continue
 			}
 			io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
-			log.Printf("cost digest sent to %s (signed)", webhookURL)
+			slog.Info("cost digest sent", "url", webhookURL)
 		case <-ctx.Done():
 			return
 		}
@@ -1551,15 +1558,15 @@ func syncTeamBudgets(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
-			rows, err := db.Query(`SELECT name, monthly_token_budget, period FROM teams`)
-			if err != nil {
-				log.Printf("team budget sync query failed: %v", err)
-				continue
-			}
-			for rows.Next() {
-				var t Team
-				if err := rows.Scan(&t.Name, &t.MonthlyTokenBudget, &t.Period); err != nil {
-					log.Printf("scan team sync row: %v", err)
+		rows, err := db.Query(`SELECT name, monthly_token_budget, period FROM teams`)
+		if err != nil {
+			slog.Error("team budget sync query failed", "err", err)
+			continue
+		}
+		for rows.Next() {
+			var t Team
+			if err := rows.Scan(&t.Name, &t.MonthlyTokenBudget, &t.Period); err != nil {
+				slog.Error("scan team sync row", "err", err)
 					continue
 				}
 				key := fmt.Sprintf("budget:team:%s:limit", t.Name)
@@ -1586,7 +1593,7 @@ func handleTeams(w http.ResponseWriter, r *http.Request) {
 			rows, err = db.Query(`SELECT id, name, monthly_token_budget, period FROM teams ORDER BY name LIMIT $1 OFFSET $2`, limit, offset)
 		}
 		if err != nil {
-			log.Printf("teams query error: %v", err)
+			slog.Error("teams query error", "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -1595,7 +1602,7 @@ func handleTeams(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var t Team
 			if err := rows.Scan(&t.ID, &t.Name, &t.MonthlyTokenBudget, &t.Period); err != nil {
-				log.Printf("scan teams list: %v", err)
+				slog.Error("scan teams list", "err", err)
 				continue
 			}
 			teams = append(teams, t)
@@ -1621,13 +1628,13 @@ func handleTeams(w http.ResponseWriter, r *http.Request) {
 			t.Name, t.MonthlyTokenBudget, t.Period, orgID,
 		).Scan(&t.ID)
 		if err != nil {
-			log.Printf("teams insert error: %v", err)
+			slog.Error("teams insert error", "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 		key := fmt.Sprintf("budget:team:%s:limit", t.Name)
 		rdb.Set(r.Context(), key, t.MonthlyTokenBudget, 0)
-		log.Printf("audit: team created id=%d name=%s from %s", t.ID, t.Name, r.RemoteAddr)
+		slog.Info("audit: team created", "id", t.ID, "name", t.Name, "remote", r.RemoteAddr)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(t)
@@ -1646,13 +1653,13 @@ func handleTeams(w http.ResponseWriter, r *http.Request) {
 			err = db.QueryRow(`DELETE FROM teams WHERE id = $1 RETURNING name`, id).Scan(&name)
 		}
 		if err != nil {
-			log.Printf("teams delete error: %v", err)
+			slog.Error("teams delete error", "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 		rdb.Del(r.Context(), fmt.Sprintf("budget:team:%s:limit", name))
 		rdb.Del(r.Context(), fmt.Sprintf("budget:team:%s:used", name))
-		log.Printf("audit: team deleted id=%d name=%s from %s", id, name, r.RemoteAddr)
+		slog.Info("audit: team deleted", "id", id, "name", name, "remote", r.RemoteAddr)
 		w.WriteHeader(http.StatusNoContent)
 
 	default:
@@ -1674,7 +1681,7 @@ func handleEscalationPolicies(w http.ResponseWriter, r *http.Request) {
 				FROM escalation_policies ORDER BY name`)
 		}
 		if err != nil {
-			log.Printf("escalation policies query error: %v", err)
+			slog.Error("escalation policies query error", "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
@@ -1684,7 +1691,7 @@ func handleEscalationPolicies(w http.ResponseWriter, r *http.Request) {
 			var p EscalationPolicy
 			var createdAt time.Time
 			if err := rows.Scan(&p.ID, &p.Name, &p.AlertType, &p.Model, &p.Severity, &p.TimeoutMinutes, &p.WebhookURL, &p.Enabled, &createdAt); err != nil {
-				log.Printf("scan escalation policy: %v", err)
+				slog.Error("scan escalation policy", "err", err)
 				continue
 			}
 			p.CreatedAt = createdAt.Format(time.RFC3339)
@@ -1718,12 +1725,12 @@ func handleEscalationPolicies(w http.ResponseWriter, r *http.Request) {
 			p.Name, p.AlertType, p.Model, p.Severity, p.TimeoutMinutes, p.WebhookURL, p.Enabled, orgID,
 		).Scan(&p.ID)
 		if err != nil {
-			log.Printf("create escalation policy error: %v", err)
+			slog.Error("create escalation policy error", "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 		p.CreatedAt = time.Now().UTC().Format(time.RFC3339)
-		log.Printf("audit: escalation policy created id=%d name=%s from %s", p.ID, p.Name, r.RemoteAddr)
+		slog.Info("audit: escalation policy created", "id", p.ID, "name", p.Name, "remote", r.RemoteAddr)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(p)
@@ -1741,11 +1748,11 @@ func handleEscalationPolicies(w http.ResponseWriter, r *http.Request) {
 			_, err = db.Exec(`DELETE FROM escalation_policies WHERE id = $1`, id)
 		}
 		if err != nil {
-			log.Printf("delete escalation policy error: %v", err)
+			slog.Error("delete escalation policy error", "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		log.Printf("audit: escalation policy deleted id=%d from %s", id, r.RemoteAddr)
+		slog.Info("audit: escalation policy deleted", "id", id, "remote", r.RemoteAddr)
 		w.WriteHeader(http.StatusNoContent)
 
 	default:
@@ -1766,7 +1773,7 @@ func handleBudgetStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		log.Printf("budget status query error: %v", err)
+		slog.Error("budget status query error", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}

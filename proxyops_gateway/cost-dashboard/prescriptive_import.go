@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -50,7 +50,7 @@ func handleImportCSV(w http.ResponseWriter, r *http.Request) {
 		}
 
 		count := processCSVRows(mapping.AssessmentID, rows, mapping)
-		log.Printf("csv import: assessment=%d rows=%d from %s", mapping.AssessmentID, count, r.RemoteAddr)
+		slog.Info("csv import", "assessment", mapping.AssessmentID, "rows", count, "from", r.RemoteAddr)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"assessment_id": mapping.AssessmentID,
@@ -146,7 +146,7 @@ func importCSVWithMapping(w http.ResponseWriter, r *http.Request) {
 		count++
 	}
 
-	log.Printf("csv import: assessment=%d parsed=%d imported=%d from %s", assessmentID, parsedCount, count, r.RemoteAddr)
+	slog.Info("csv import", "assessment", assessmentID, "parsed", parsedCount, "imported", count, "from", r.RemoteAddr)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"assessment_id": assessmentID,
