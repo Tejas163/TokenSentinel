@@ -2,8 +2,8 @@
 
 ## Phase 1: Polish & Test Coverage (high value, low effort)
 
-- [ ] **Cost dashboard structured logging** — replace log.Printf with slog
-- [ ] **`/metrics` endpoint** for cost-dashboard
+- [x] **Cost dashboard structured logging** — replace log.Printf with slog
+- [x] **`/metrics` endpoint** for cost-dashboard
 - [x] **Go router package split** — break up 576-line main.go into types.go, middleware.go, handlers.go, routing.go
 - [x] **Budget enforcement unit tests** for go-router budget check logic (enforceBudget, cheapestProvider, cheapestScore)
 - [x] **Auto model selection unit tests** for selectModel() in go-router (modelTierFor, closerTier, selectModel)
