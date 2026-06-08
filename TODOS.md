@@ -11,8 +11,8 @@
 ## Phase 2: Production Hardening (medium effort)
 
 - [ ] **Virtual API keys** (M) — Redis-backed key store, per-service/per-key auth, per-key budgets + rate limits
-- [ ] **Deploy acceleration** (S) — pre-built Docker images, docker-compose.override.yml
-- [ ] **Performance benchmarks** (S) — k6 suite + published results (RPS, p50/p95/p99)
+- [x] **Deploy acceleration** (S) — docker-compose.override.yml with pre-built image refs
+- [x] **Performance benchmarks** (S) — k6 suite with ramp-up/soak/spike scenarios
 
 ## Phase 3: Advanced Features (larger effort)
 
