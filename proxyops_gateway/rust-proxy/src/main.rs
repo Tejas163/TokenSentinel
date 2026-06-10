@@ -1,3 +1,4 @@
+mod auth;
 mod circuit_breaker;
 mod metrics;
 mod request_id;
@@ -61,11 +62,13 @@ async fn main() {
 
     let mcp_routes = Router::new()
         .route("/{*path}", get(mcp_handler).post(mcp_handler))
+        .layer(axum::middleware::from_fn_with_state(state.clone(), auth::auth_middleware))
         .layer(axum::middleware::from_fn(request_id::request_id_middleware))
         .layer(TraceLayer::new_for_http());
 
     let proxy_routes = Router::new()
         .route("/{*path}", get(handler).post(handler))
+        .layer(axum::middleware::from_fn_with_state(state.clone(), auth::auth_middleware))
         .layer(axum::middleware::from_fn(request_id::request_id_middleware))
         .layer(TraceLayer::new_for_http());
 
@@ -236,6 +239,8 @@ async fn handler(
         header::USER_AGENT,
         HeaderName::from_static("x-request-id"),
         HeaderName::from_static("x-forwarded-for"),
+        HeaderName::from_static("x-api-key"),
+        HeaderName::from_static("x-team-name"),
     ];
     let mut filtered_headers = HeaderMap::new();
     for h in safe_request_headers {
