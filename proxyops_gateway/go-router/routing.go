@@ -24,6 +24,9 @@ var (
 )
 
 func enforceBudget(ctx context.Context, team string, providers []UpstreamConfig, target *UpstreamConfig) *UpstreamConfig {
+	if rdb == nil || team == "" {
+		return target
+	}
 	usedRaw, err := rdb.Get(ctx, fmt.Sprintf("budget:team:%s:used", team)).Result()
 	if err == redis.Nil {
 		slog.Debug("budget: no usage record for team", "team", team)

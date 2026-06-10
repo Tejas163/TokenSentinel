@@ -58,7 +58,7 @@ func withKey(r *http.Request, key string) *http.Request {
 // authMiddleware
 // ---------------------------------------------------------------------------
 
-func TestAuthMiddleware_passthroughWhenKeyEmpty(t *testing.T) {
+func TestAuthMiddleware_rejectsWhenKeyMissing(t *testing.T) {
 	authAPIKey = ""
 	defer func() { authAPIKey = "test-key-123" }()
 
@@ -70,11 +70,11 @@ func TestAuthMiddleware_passthroughWhenKeyEmpty(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	h(w, request("GET", "/api/dashboard/costs"))
-	if !called {
-		t.Fatal("expected handler to be called")
+	if called {
+		t.Fatal("handler should not be called when no key provided")
 	}
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", w.Code)
 	}
 }
 

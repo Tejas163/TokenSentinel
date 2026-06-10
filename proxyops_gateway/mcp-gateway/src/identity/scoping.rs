@@ -19,7 +19,6 @@ pub fn team_for_api_key(key: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::collections::HashMap;
 
     fn env_map() -> HashMap<String, String> {
