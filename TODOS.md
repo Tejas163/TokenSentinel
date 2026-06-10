@@ -10,7 +10,8 @@
 
 ## Phase 2: Production Hardening (medium effort)
 
-- [ ] **Virtual API keys** (M) — Redis-backed key store, per-service/per-key auth, per-key budgets + rate limits
+- [x] **Virtual API keys — core** (M) — Redis-backed key store, validated at rust-proxy ingress, per-key rate limits, team scoping
+- [x] **Virtual API keys — CRUD API** (S) — cost-dashboard endpoints for managing keys (create, revoke, list, update)
 - [x] **Deploy acceleration** (S) — docker-compose.override.yml with pre-built image refs
 - [x] **Performance benchmarks** (S) — k6 suite with ramp-up/soak/spike scenarios
 

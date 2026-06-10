@@ -32,7 +32,7 @@ func handleReport(w http.ResponseWriter, r *http.Request, id int) {
 	if strings.Contains(accept, "text/html") || strings.HasPrefix(accept, "*/*") || accept == "" {
 		reportJSON, _ := json.Marshal(report)
 		reportTmpl.Execute(w, map[string]interface{}{
-			"APIKey":     authAPIKey,
+			"APIKey":     requestAPIKey(r),
 			"ReportJSON": template.JS(reportJSON),
 		})
 		return

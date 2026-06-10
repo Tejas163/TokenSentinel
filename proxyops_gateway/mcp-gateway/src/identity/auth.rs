@@ -1,4 +1,7 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+use crate::redis;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AgentClaims {
@@ -9,9 +12,30 @@ pub struct AgentClaims {
     pub scopes: Vec<String>,
 }
 
-pub fn verify_api_key(key: &str) -> bool {
+pub async fn verify_api_key(key: &str) -> Option<(Option<String>, Vec<String>)> {
+    if let Ok(mut conn) = redis::get_connection().await {
+        let fields: HashMap<String, String> = ::redis::cmd("HGETALL")
+            .arg(format!("apikey:{}", key))
+            .query_async(&mut conn)
+            .await
+            .unwrap_or_default();
+
+        if !fields.is_empty() {
+            let status = fields.get("status").map(|s| s.as_str()).unwrap_or("active");
+            if status != "active" {
+                return None;
+            }
+            let team = fields.get("team").cloned().filter(|t| !t.is_empty());
+            return Some((team, vec!["*".into()]));
+        }
+    }
+
     let valid_keys = std::env::var("MCP_API_KEY").unwrap_or_default();
-    valid_keys.split(',').any(|k| k.trim() == key)
+    if valid_keys.split(',').any(|k| k.trim() == key) {
+        return Some((None, vec!["*".into()]));
+    }
+
+    None
 }
 
 pub fn jwt_secret() -> Option<Vec<u8>> {

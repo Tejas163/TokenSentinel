@@ -33,7 +33,13 @@ func main() {
 	mux.HandleFunc("/metrics", authMiddleware(metricsHandler))
 	mux.HandleFunc("/", authMiddleware(rateLimitMiddleware(proxyHandler)))
 
-	slog.Info("starting server", "addr", ":8080", "redis", redisAddr, "auth_enabled", authAPIKey != "")
+	if authAPIKey != "" {
+		slog.Info("auth: using static AUTH_API_KEY (legacy mode)")
+	} else {
+		slog.Info("auth: using Redis-backed virtual API keys")
+	}
+
+	slog.Info("starting server", "addr", ":8080", "redis", redisAddr)
 	if err := http.ListenAndServe(":8080", mux); err != nil {
 		slog.Error("server failed", "error", err)
 		os.Exit(1)

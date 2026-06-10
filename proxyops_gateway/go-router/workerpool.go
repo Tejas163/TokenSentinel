@@ -11,10 +11,11 @@ type costTask struct {
 	model        string
 	inputTokens  int
 	outputTokens int
+	team         string
 }
 
 func (t costTask) execute(ctx context.Context) {
-	recordCost(ctx, t.reqID, t.model, t.inputTokens, t.outputTokens)
+	recordCost(ctx, t.reqID, t.model, t.team, t.inputTokens, t.outputTokens)
 }
 
 type cacheTask struct {

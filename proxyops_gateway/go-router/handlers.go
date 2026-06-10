@@ -103,7 +103,7 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if team := r.Header.Get("X-Team-Name"); team != "" {
+	if team, ok := r.Context().Value(teamKey).(string); ok && team != "" {
 		target = enforceBudget(r.Context(), team, route.Providers, target)
 	}
 
@@ -139,11 +139,13 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 
 	inputTokens = estimateTokens(string(body), target.Model)
 	outputTokens := estimateTokens(string(respBody), target.Model)
+	costTeam, _ := r.Context().Value(teamKey).(string)
 	defaultPool.Submit(costTask{
 		reqID:        reqID,
 		model:        target.Model,
 		inputTokens:  inputTokens,
 		outputTokens: outputTokens,
+		team:         costTeam,
 	})
 
 	costCents := estimateCost(inputTokens, outputTokens, target.Model)

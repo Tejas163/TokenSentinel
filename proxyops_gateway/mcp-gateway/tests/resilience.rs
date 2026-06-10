@@ -5,11 +5,26 @@ use axum::{
 use mcp_gateway::create_app;
 use tower::ServiceExt;
 
+const TEST_API_KEY: &str = "integration-test-key";
+
 fn setup() {
-    unsafe { std::env::set_var("MCP_API_KEY", ""); }
+    unsafe {
+        std::env::set_var("MCP_API_KEY", TEST_API_KEY);
+        std::env::set_var("REDIS_URL", "");
+    }
     let _ = tracing_subscriber::fmt()
         .with_env_filter("mcp_gateway=error")
         .try_init();
+}
+
+fn with_auth(req: Request<Body>) -> Request<Body> {
+    let (parts, body) = req.into_parts();
+    let mut parts = parts;
+    parts.headers.insert(
+        "X-Api-Key",
+        axum::http::HeaderValue::from_static(TEST_API_KEY),
+    );
+    Request::from_parts(parts, body)
 }
 
 #[tokio::test]
@@ -53,9 +68,8 @@ async fn health_returns_valid_json() {
 
 #[tokio::test]
 async fn health_is_degraded_without_redis() {
-    // REDIS_URL points to nonexistent redis
-    unsafe { std::env::set_var("REDIS_URL", "redis://127.0.0.1:9999"); }
     setup();
+    unsafe { std::env::set_var("REDIS_URL", "redis://127.0.0.1:9999"); }
     let app = create_app();
 
     let response = app
@@ -97,13 +111,13 @@ async fn sse_connect_returns_streaming_response() {
     let app = create_app();
 
     let response = app
-        .oneshot(
+        .oneshot(with_auth(
             Request::builder()
                 .uri("/mcp/v1/sse")
                 .header("Accept", "text/event-stream")
                 .body(Body::empty())
                 .unwrap(),
-        )
+        ))
         .await
         .unwrap();
 
@@ -123,14 +137,14 @@ async fn message_without_session_id_returns_error() {
     let body_bytes = serde_json::to_vec(&body).unwrap();
 
     let response = app
-        .oneshot(
+        .oneshot(with_auth(
             Request::builder()
                 .uri("/mcp/v1/message")
                 .method(Method::POST)
                 .header("Content-Type", "application/json")
                 .body(Body::from(body_bytes))
                 .unwrap(),
-        )
+        ))
         .await
         .unwrap();
 
@@ -149,14 +163,14 @@ async fn message_invalid_json_returns_422() {
     let app = create_app();
 
     let response = app
-        .oneshot(
+        .oneshot(with_auth(
             Request::builder()
                 .uri("/mcp/v1/message?session_id=test")
                 .method(Method::POST)
                 .header("Content-Type", "application/json")
                 .body(Body::from("not valid json"))
                 .unwrap(),
-        )
+        ))
         .await
         .unwrap();
 
@@ -183,9 +197,7 @@ async fn unknown_route_returns_404() {
 }
 
 #[tokio::test]
-async fn message_without_auth_still_works_when_no_key_configured() {
-    // When MCP_API_KEY is empty, auth is bypassed
-    unsafe { std::env::set_var("MCP_API_KEY", ""); }
+async fn message_with_auth_key_configured() {
     setup();
     let app = create_app();
 
@@ -197,14 +209,14 @@ async fn message_without_auth_still_works_when_no_key_configured() {
     let body_bytes = serde_json::to_vec(&body).unwrap();
 
     let response = app
-        .oneshot(
+        .oneshot(with_auth(
             Request::builder()
                 .uri("/mcp/v1/message?session_id=test-session")
                 .method(Method::POST)
                 .header("Content-Type", "application/json")
                 .body(Body::from(body_bytes))
                 .unwrap(),
-        )
+        ))
         .await
         .unwrap();
 
@@ -229,14 +241,14 @@ async fn message_to_nonexistent_session_returns_session_error() {
     let body_bytes = serde_json::to_vec(&body).unwrap();
 
     let response = app
-        .oneshot(
+        .oneshot(with_auth(
             Request::builder()
                 .uri("/mcp/v1/message?session_id=nonexistent")
                 .method(Method::POST)
                 .header("Content-Type", "application/json")
                 .body(Body::from(body_bytes))
                 .unwrap(),
-        )
+        ))
         .await
         .unwrap();
 
@@ -260,14 +272,14 @@ async fn tools_list_accepts_no_args() {
     let body_bytes = serde_json::to_vec(&body).unwrap();
 
     let response = app
-        .oneshot(
+        .oneshot(with_auth(
             Request::builder()
                 .uri("/mcp/v1/message?session_id=test-session")
                 .method(Method::POST)
                 .header("Content-Type", "application/json")
                 .body(Body::from(body_bytes))
                 .unwrap(),
-        )
+        ))
         .await
         .unwrap();
 
@@ -284,14 +296,18 @@ async fn double_sse_connect_creates_separate_sessions() {
     setup();
     let app = create_app();
 
-    let req1 = Request::builder()
-        .uri("/mcp/v1/sse")
-        .body(Body::empty())
-        .unwrap();
-    let req2 = Request::builder()
-        .uri("/mcp/v1/sse")
-        .body(Body::empty())
-        .unwrap();
+    let req1 = with_auth(
+        Request::builder()
+            .uri("/mcp/v1/sse")
+            .body(Body::empty())
+            .unwrap(),
+    );
+    let req2 = with_auth(
+        Request::builder()
+            .uri("/mcp/v1/sse")
+            .body(Body::empty())
+            .unwrap(),
+    );
 
     let (resp1, resp2) = tokio::join!(
         app.clone().oneshot(req1),
@@ -310,13 +326,13 @@ async fn post_to_sse_endpoint_returns_405() {
     let app = create_app();
 
     let response = app
-        .oneshot(
+        .oneshot(with_auth(
             Request::builder()
                 .uri("/mcp/v1/sse")
                 .method(Method::POST)
                 .body(Body::empty())
                 .unwrap(),
-        )
+        ))
         .await
         .unwrap();
 
@@ -330,13 +346,13 @@ async fn get_to_message_endpoint_returns_405() {
     let app = create_app();
 
     let response = app
-        .oneshot(
+        .oneshot(with_auth(
             Request::builder()
                 .uri("/mcp/v1/message")
                 .method(Method::GET)
                 .body(Body::empty())
                 .unwrap(),
-        )
+        ))
         .await
         .unwrap();
 

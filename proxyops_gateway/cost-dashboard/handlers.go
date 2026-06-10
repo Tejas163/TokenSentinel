@@ -709,6 +709,11 @@ func handleStaticCSS(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleDashboard(w http.ResponseWriter, r *http.Request) {
-	data := map[string]string{"APIKey": authAPIKey}
+	apiKey := requestAPIKey(r)
+	if apiKey == "" {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+	data := map[string]string{"APIKey": apiKey}
 	tmpls.Execute(w, data)
 }
