@@ -221,14 +221,17 @@ func proxyWithRetry(ctx context.Context, reqID, target string, method string, bo
 	return 0, nil, fmt.Errorf("max retries exceeded")
 }
 
-func recordCost(ctx context.Context, reqID, model string, inputTokens, outputTokens int) {
+func recordCost(ctx context.Context, reqID, model, team string, inputTokens, outputTokens int) {
 	costKey := fmt.Sprintf("sentinel:%s:cost", reqID)
+	if team == "" {
+		team = os.Getenv("BUDGET_TEAM_NAME")
+	}
 	entry := map[string]interface{}{
 		"model":         model,
 		"input_tokens":  inputTokens,
 		"output_tokens": outputTokens,
 		"timestamp":     time.Now().UTC().Format(time.RFC3339),
-		"team":          os.Getenv("BUDGET_TEAM_NAME"),
+		"team":          team,
 	}
 	data, _ := json.Marshal(entry)
 

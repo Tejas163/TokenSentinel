@@ -48,11 +48,26 @@ func initRateLimiter() {
 	slog.Info("rate limiter initialized", "capacity", capacity, "refill_per_second", refill)
 }
 
-func (rl *rateLimiter) getBucket(key string) *tokenBucket {
+func (rl *rateLimiter) getBucket(key string, capacity, refill float64) *tokenBucket {
+	if capacity <= 0 {
+		capacity = rl.capacity
+	}
+	if refill <= 0 {
+		refill = rl.refill
+	}
 	rl.mu.RLock()
 	b, ok := rl.buckets[key]
 	rl.mu.RUnlock()
 	if ok {
+		b.mu.Lock()
+		if b.capacity != capacity || b.refillRate != refill {
+			b.capacity = capacity
+			b.refillRate = refill
+			if b.tokens > b.capacity {
+				b.tokens = b.capacity
+			}
+		}
+		b.mu.Unlock()
 		return b
 	}
 	rl.mu.Lock()
@@ -61,9 +76,9 @@ func (rl *rateLimiter) getBucket(key string) *tokenBucket {
 		return b
 	}
 	b = &tokenBucket{
-		tokens:     rl.capacity,
-		capacity:   rl.capacity,
-		refillRate: rl.refill,
+		tokens:     capacity,
+		capacity:   capacity,
+		refillRate: refill,
 		lastRefill: time.Now(),
 	}
 	rl.buckets[key] = b
@@ -93,10 +108,18 @@ func rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		key := r.RemoteAddr
-		if apiKey := r.Header.Get("X-Api-Key"); apiKey != "" {
+		capacity := globalRateLimiter.capacity
+		refill := globalRateLimiter.refill
+
+		if ak, ok := r.Context().Value(apiKeyInfoKey).(*APIKey); ok && ak != nil && ak.RateLimitRPS > 0 {
+			key = extractKey(r)
+			capacity = float64(ak.RateLimitRPS)
+			refill = float64(ak.RateLimitRPS)
+		} else if apiKey := extractKey(r); apiKey != "" {
 			key = apiKey
 		}
-		b := globalRateLimiter.getBucket(key)
+
+		b := globalRateLimiter.getBucket(key, capacity, refill)
 		if !b.allow() {
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Retry-After", "1")

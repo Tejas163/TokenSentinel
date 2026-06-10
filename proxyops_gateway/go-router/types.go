@@ -9,6 +9,8 @@ import (
 type contextKey string
 
 const reqIDKey contextKey = "request_id"
+const teamKey contextKey = "team"
+const apiKeyInfoKey contextKey = "api_key_info"
 
 var sensitiveHeaders = map[string]bool{
 	"authorization":       true,
