@@ -16,5 +16,10 @@ func init() {
 }
 
 func handleAssessmentFrontend(w http.ResponseWriter, r *http.Request) {
-	assessmentTmpl.Execute(w, map[string]string{"APIKey": authAPIKey})
+	apiKey := requestAPIKey(r)
+	if apiKey == "" {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+	assessmentTmpl.Execute(w, map[string]string{"APIKey": apiKey})
 }
