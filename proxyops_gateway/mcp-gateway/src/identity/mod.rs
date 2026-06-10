@@ -16,7 +16,6 @@ pub struct AgentInfo {
 }
 
 pub async fn auth_middleware(mut req: Request, next: Next) -> Result<Response, StatusCode> {
-    // Try JWT first
     if let Some(secret) = auth::jwt_secret() {
         let token = req
             .headers()
@@ -46,9 +45,10 @@ pub async fn auth_middleware(mut req: Request, next: Next) -> Result<Response, S
         }
     }
 
-    // Fallback: API key auth (Phase 1 compatibility)
     let api_key = std::env::var("MCP_API_KEY").unwrap_or_default();
-    if api_key.is_empty() {
+    let redis_url = std::env::var("REDIS_URL").unwrap_or_default();
+
+    if api_key.is_empty() && redis_url.is_empty() {
         req.extensions_mut().insert(AgentInfo {
             agent_id: None,
             team: None,
@@ -70,20 +70,31 @@ pub async fn auth_middleware(mut req: Request, next: Next) -> Result<Response, S
         .and_then(|v| v.strip_prefix("Bearer "))
         .unwrap_or("");
 
-    let used_key = if auth::verify_api_key(header_key) {
+    let used_key = if !header_key.is_empty() {
         header_key
-    } else if auth::verify_api_key(bearer_key) {
+    } else if !bearer_key.is_empty() {
         bearer_key
     } else {
         tracing::warn!("mcp auth failure: {}", req.uri().path());
         return Err(StatusCode::UNAUTHORIZED);
     };
 
-    let team = scoping::team_for_api_key(used_key).await;
-    req.extensions_mut().insert(AgentInfo {
-        agent_id: None,
-        team,
-        scopes: vec!["*".into()],
-    });
-    Ok(next.run(req).await)
+    match auth::verify_api_key(used_key).await {
+        Some((team, scopes)) => {
+            let team = team.or_else(|| {
+                let env_team = scoping::team_for_api_key(used_key);
+                env_team
+            });
+            req.extensions_mut().insert(AgentInfo {
+                agent_id: None,
+                team,
+                scopes,
+            });
+            Ok(next.run(req).await)
+        }
+        None => {
+            tracing::warn!("mcp auth failure: {}", req.uri().path());
+            Err(StatusCode::UNAUTHORIZED)
+        }
+    }
 }
