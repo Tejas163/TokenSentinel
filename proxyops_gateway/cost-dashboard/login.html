@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TokenSentinel — Sign In</title>
+<link rel="stylesheet" href="/static/styles.css">
+<style>
+  .login-page { display: flex; align-items: center; justify-content: center; min-height: 80vh; }
+  .login-card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 2.5rem; width: 100%; max-width: 420px; }
+  .login-card h1 { font-size: 1.5rem; margin-bottom: 0.25rem; color: #f8fafc; }
+  .login-card p { font-size: 0.85rem; color: #64748b; margin-bottom: 1.5rem; }
+  .login-card label { display: block; font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.4rem; }
+  .login-card input { width: 100%; padding: 0.65rem 0.75rem; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 0.9rem; outline: none; box-sizing: border-box; }
+  .login-card input:focus { border-color: #38bdf8; }
+  .login-card .err { color: #fca5a5; background: #7f1d1d; border: 1px solid #dc2626; border-radius: 6px; padding: 0.6rem 0.75rem; font-size: 0.85rem; margin-bottom: 1rem; display: none; }
+  .login-card .err.show { display: block; }
+  .login-card .btn { width: 100%; padding: 0.65rem; border: none; border-radius: 6px; background: #38bdf8; color: #0f172a; font-weight: 600; font-size: 0.9rem; cursor: pointer; margin-top: 0.5rem; }
+  .login-card .btn:hover { background: #7dd3fc; }
+  .login-card .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .login-card .hint { margin-top: 1rem; font-size: 0.8rem; color: #64748b; }
+  .login-card .hint code { background: #0f172a; padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.8rem; color: #38bdf8; }
+</style>
+</head>
+<body>
+<div class="login-page">
+  <div class="login-card">
+    <h1>&#9632; TokenSentinel</h1>
+    <p>Sign in with your API key to access the cost dashboard.</p>
+    <form method="POST" action="/login" id="login-form">
+      <label for="key">API Key</label>
+      <input type="password" id="key" name="api_key" placeholder="sk_..." required autofocus>
+      <div class="err" id="login-err"></div>
+      <button type="submit" class="btn" id="login-btn">Sign In</button>
+    </form>
+    <div class="hint">
+      Don't have a key? Use <code>dev-key-123</code> for local development.
+    </div>
+  </div>
+</div>
+<script>
+document.getElementById('login-form').addEventListener('submit', async function(e) {
+  e.preventDefault();
+  var btn = document.getElementById('login-btn');
+  var errEl = document.getElementById('login-err');
+  btn.disabled = true;
+  btn.textContent = 'Verifying...';
+  errEl.classList.remove('show');
+  try {
+    var r = await fetch('/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: 'api_key=' + encodeURIComponent(document.getElementById('key').value)
+    });
+    if (r.ok) {
+      window.location.href = '/dashboard';
+    } else {
+      var text = await r.text();
+      errEl.textContent = text || 'Invalid API key';
+      errEl.classList.add('show');
+    }
+  } catch(e) {
+    errEl.textContent = 'Connection error';
+    errEl.classList.add('show');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Sign In';
+  }
+});
+</script>
+</body>
+</html>

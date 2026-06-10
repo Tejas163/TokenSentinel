@@ -52,7 +52,7 @@ func main() {
 	redisAddr := lookupEnv("REDIS_ADDR", "localhost:6379")
 	dsn := lookupEnv("DATABASE_URL", "postgres://localhost:5432/cost_dashboard?sslmode=disable")
 	port := lookupEnv("PORT", "3001")
-	authAPIKey = lookupEnv("AUTH_API_KEY", "")
+	authAPIKey = os.Getenv("AUTH_API_KEY")
 	if v := lookupEnv("ANOMALY_Z_SCORE", "3.0"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
 			anomalyZScore = f
@@ -131,6 +131,7 @@ func main() {
 	mux.HandleFunc("/api/admin/pricing/", metricsMiddleware(rateLimitMiddleware(orgMiddleware(handleAdminPricing))))
 	mux.HandleFunc("/api/admin/seed-demo", metricsMiddleware(rateLimitMiddleware(authMiddleware(handleAdminSeed))))
 	mux.HandleFunc("/api/admin/escalation-policies", metricsMiddleware(rateLimitMiddleware(orgMiddleware(handleEscalationPolicies))))
+	mux.HandleFunc("/api/admin/keys", metricsMiddleware(rateLimitMiddleware(authMiddleware(handleAdminKeys))))
 	mux.HandleFunc("/api/budget/status", metricsMiddleware(orgMiddleware(handleBudgetStatus)))
 	mux.HandleFunc("/api/playground/models", metricsMiddleware(authMiddleware(handlePlaygroundModels)))
 	mux.HandleFunc("/api/playground/send", metricsMiddleware(authMiddleware(handlePlaygroundSend)))
@@ -150,12 +151,15 @@ func main() {
 	mux.HandleFunc("/v1/admin/pricing/", metricsMiddleware(rateLimitMiddleware(orgMiddleware(handleAdminPricing))))
 	mux.HandleFunc("/v1/admin/seed-demo", metricsMiddleware(rateLimitMiddleware(authMiddleware(handleAdminSeed))))
 	mux.HandleFunc("/v1/admin/escalation-policies", metricsMiddleware(rateLimitMiddleware(orgMiddleware(handleEscalationPolicies))))
+	mux.HandleFunc("/v1/admin/keys", metricsMiddleware(rateLimitMiddleware(authMiddleware(handleAdminKeys))))
 	mux.HandleFunc("/v1/budget/status", metricsMiddleware(orgMiddleware(handleBudgetStatus)))
 	mux.HandleFunc("/v1/playground/models", metricsMiddleware(authMiddleware(handlePlaygroundModels)))
 	mux.HandleFunc("/v1/playground/send", metricsMiddleware(authMiddleware(handlePlaygroundSend)))
 	mux.HandleFunc("/v1/prescriptive/report/", metricsMiddleware(handleReportFrontend))
 	mux.HandleFunc("/v1/prescriptive/", metricsMiddleware(orgMiddleware(handlePrescriptiveRouter)))
 	mux.HandleFunc("/v1/monitoring/", metricsMiddleware(orgMiddleware(handleMonitoringRouter)))
+	mux.HandleFunc("/login", metricsMiddleware(handleLogin))
+	mux.HandleFunc("/logout", metricsMiddleware(handleLogout))
 	mux.HandleFunc("/static/styles.css", metricsMiddleware(handleStaticCSS))
 	mux.HandleFunc("/assessments", metricsMiddleware(handleAssessmentFrontend))
 	mux.HandleFunc("/dashboard", metricsMiddleware(handleDashboard))
@@ -299,18 +303,7 @@ func initDB() error {
 		return err
 	}
 
-	_, err = db.Exec(`ALTER TABLE monitoring_rules ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT ''`)
-	if err != nil {
-		return err
-	}
-	_, err = db.Exec(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT ''`)
-	if err != nil {
-		return err
-	}
-	_, err = db.Exec(`ALTER TABLE savings_events ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT ''`)
-	if err != nil {
-		return err
-	}
+
 	_, err = db.Exec(`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS escalated_at TIMESTAMPTZ`)
 	if err != nil {
 		return err
