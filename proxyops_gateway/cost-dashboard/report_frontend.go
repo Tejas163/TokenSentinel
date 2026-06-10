@@ -48,7 +48,7 @@ func handleReportFrontend(w http.ResponseWriter, r *http.Request) {
 		}
 		reportJSON, _ := json.Marshal(report)
 		reportTmpl.Execute(w, map[string]interface{}{
-			"APIKey":     authAPIKey,
+			"APIKey":     requestAPIKey(r),
 			"ReportJSON": template.JS(reportJSON),
 		})
 		return

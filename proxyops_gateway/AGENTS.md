@@ -23,10 +23,12 @@ Client/AI Agent → rust-proxy (:3000) ─┬→ go-router (:8080) → upstream
                                                            redis / postgres
 ```
 
-- MCP agents connect to rust-proxy `:3000` with `MCP_API_KEY`, which forwards `/mcp/*` to `mcp-gateway:3010`
-- `mcp-gateway` exposes MCP HTTP transport (SSE + POST /message) with 11 tools
+- All requests to rust-proxy `:3000` require a valid API key (`X-Api-Key` or `Authorization: Bearer`)
+- Keys are validated via Redis HGETALL on `apikey:{key}` (status must be "active")
+- Valid keys inject `X-Team-Name` header for downstream budget enforcement
+- mcp-gateway also validates keys independently (Redis then fallback to `MCP_API_KEY` env var)
 - Cost-aware routing uses cached model catalog from prescriptive engine, refreshed every 5min
-- Team data scoping: `AGENT_TEAM_MAP` env var maps API keys to teams, forwarded as `X-Team-Name`
+- Team data scoping: `AGENT_TEAM_MAP` env var maps env-based API keys to teams; Redis keys carry their own team
 - Budget-aware access control: blocks tool calls for teams that exceeded budget
 
 ## MCP Tools (11)
@@ -49,11 +51,38 @@ Client/AI Agent → rust-proxy (:3000) ─┬→ go-router (:8080) → upstream
 
 | Var | Used By | Purpose |
 |-----|---------|---------|
-| `MCP_API_KEY` | mcp-gateway | Comma-separated API keys for MCP auth |
-| `AGENT_TEAM_MAP` | mcp-gateway | `key=team,key=team` mapping for data scoping |
+| `MCP_API_KEY` | mcp-gateway | Comma-separated API keys for MCP auth (fallback when no Redis) |
+| `AGENT_TEAM_MAP` | mcp-gateway | `key=team,key=team` mapping for data scoping (fallback) |
 | `DASHBOARD_URL` | mcp-gateway | Cost dashboard base URL |
 | `DASHBOARD_API_KEY` | mcp-gateway | API key for dashboard upstream calls |
 | `REDIS_URL` / `REDIS_ADDR` | all services | Redis connection string |
+| `AUTH_API_KEY` | go-router, cost-dashboard | Static key (legacy mode; omit to use Redis-backed keys) |
+
+## Virtual API Keys
+
+API keys are stored in Redis as hashes at `apikey:{key}` with fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Human-readable label |
+| `team` | string | Team for budget enforcement |
+| `status` | string | `active` or `inactive` |
+| `budget_monthly_cents` | int | Monthly budget cap in cents |
+| `rate_limit_rps` | int | Requests-per-second limit |
+| `allowed_models` | JSON string array | `["*"]` or specific model prefixes |
+| `allowed_services` | JSON string array | `["proxy","mcp","dashboard"]` |
+
+Seed a key via `scripts/seed-keys.sh` or use the CRUD API:
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/admin/keys` | Create key (`name`, `team`, `budget_monthly_cents`, `rate_limit_rps`, `allowed_models`, `allowed_services`) |
+| GET | `/api/admin/keys` | List all keys |
+| GET | `/api/admin/keys?key=xxx` | Get key details |
+| PUT | `/api/admin/keys?key=xxx` | Update key fields (partial update) |
+| DELETE | `/api/admin/keys?key=xxx` | Delete/revoke key |
+
+All endpoints require a valid API key in `X-Api-Key` or `Authorization: Bearer` header.
 
 ## Project Structure
 

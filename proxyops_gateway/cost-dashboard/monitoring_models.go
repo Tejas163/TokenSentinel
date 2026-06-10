@@ -105,6 +105,18 @@ func initMonitoringTables(db *sql.DB) error {
 			return fmt.Errorf("monitoring table init: %w", err)
 		}
 	}
+
+	migrations := []string{
+		`ALTER TABLE monitoring_rules ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE savings_events ADD COLUMN IF NOT EXISTS org_id TEXT NOT NULL DEFAULT ''`,
+	}
+	for _, stmt := range migrations {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("monitoring migration: %w", err)
+		}
+	}
+
 	return nil
 }
 
