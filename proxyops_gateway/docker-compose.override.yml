@@ -16,3 +16,9 @@ services:
   mcp-gateway:
     image: tokensentinel/mcp-gateway:latest
     build: ./mcp-gateway
+
+  evolunet-slm:
+    image: tokensentinel/evolunet-slm:latest
+    build:
+      context: ../evolunet_slm
+      dockerfile: Dockerfile

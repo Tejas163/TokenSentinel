@@ -49,6 +49,9 @@ var (
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo, AddSource: true})))
 
+	shutdownOTel := initOTel()
+	defer shutdownOTel()
+
 	redisAddr := lookupEnv("REDIS_ADDR", "localhost:6379")
 	dsn := lookupEnv("DATABASE_URL", "postgres://localhost:5432/cost_dashboard?sslmode=disable")
 	port := lookupEnv("PORT", "3001")
@@ -167,7 +170,7 @@ func main() {
 	mux.HandleFunc("/api/enterprise/inquiry", metricsMiddleware(handleEnterpriseInquiry))
 	mux.HandleFunc("/", metricsMiddleware(handleLanding))
 
-	srv := &http.Server{Addr: ":" + port, Handler: mux}
+	srv := &http.Server{Addr: ":" + port, Handler: otelMiddleware(mux.ServeHTTP)}
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)

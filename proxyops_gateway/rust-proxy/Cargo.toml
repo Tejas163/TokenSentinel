@@ -16,5 +16,9 @@ tower-http = { version = "0.6", features = ["trace", "catch-panic"] }
 # Distributed Observability
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-opentelemetry = "0.28"
+opentelemetry = "0.28"
+opentelemetry_sdk = { version = "0.28", features = ["rt-tokio"] }
+opentelemetry-otlp = "0.28"
 uuid = { version = "1.23.2", features = ["v4"] }
 chrono = "0.4"

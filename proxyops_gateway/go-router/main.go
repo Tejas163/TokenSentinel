@@ -24,14 +24,17 @@ func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	authAPIKey = os.Getenv("AUTH_API_KEY")
 
+	shutdownOTel := initOTel()
+	defer shutdownOTel()
+
 	initSemanticCache(rdb)
 	initRateLimiter()
 	defaultPool = newWorkerPool(0)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", authMiddleware(healthHandler))
-	mux.HandleFunc("/metrics", authMiddleware(metricsHandler))
-	mux.HandleFunc("/", authMiddleware(rateLimitMiddleware(proxyHandler)))
+	mux.HandleFunc("/health", otelMiddleware(authMiddleware(healthHandler)))
+	mux.HandleFunc("/metrics", otelMiddleware(authMiddleware(metricsHandler)))
+	mux.HandleFunc("/", otelMiddleware(authMiddleware(rateLimitMiddleware(proxyHandler))))
 
 	if authAPIKey != "" {
 		slog.Info("auth: using static AUTH_API_KEY (legacy mode)")

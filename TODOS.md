@@ -17,9 +17,9 @@
 
 ## Phase 3: Advanced Features (larger effort)
 
-- [ ] **OpenTelemetry trace propagation** across rust-proxy → go-router → cost-dashboard
-- [ ] **K8s manifests** for cost-dashboard, mcp-gateway, and supporting services
+- [x] **OpenTelemetry trace propagation** across rust-proxy → go-router → cost-dashboard → mcp-gateway
+- [x] **K8s manifests** for cost-dashboard, mcp-gateway, and supporting services
 
 ## Phase 4: Integration
 
-- [ ] **evolunet_slm/ integration** — 40 Python tests, no integration path into gateway
+- [x] **evolunet_slm/ integration** — FastAPI HTTP service wrapping EvolveOrchestrator, Dockerfile, docker-compose entry

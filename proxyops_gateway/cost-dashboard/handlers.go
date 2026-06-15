@@ -56,7 +56,9 @@ func handleHealthAll(w http.ResponseWriter, r *http.Request) {
 	if routerURL == "" {
 		routerURL = "http://go-router:8080"
 	}
-	if resp, err := http.Get(routerURL + "/health"); err != nil {
+	req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, routerURL+"/health", nil)
+	injectTraceContext(r.Context(), req.Header)
+	if resp, err := http.DefaultClient.Do(req); err != nil {
 		services = append(services, serviceHealth{Service: "go-router", Status: "down", Error: err.Error(), Latency: time.Since(start).String()})
 	} else {
 		resp.Body.Close()

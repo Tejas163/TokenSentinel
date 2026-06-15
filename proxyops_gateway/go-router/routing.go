@@ -187,6 +187,7 @@ func proxyWithRetry(ctx context.Context, reqID, target string, method string, bo
 			}
 		}
 		req.Header.Set("X-Request-ID", reqID)
+		injectTraceContext(ctx, req.Header)
 
 		timeout := 30
 		client := getHTTPClient(timeout)

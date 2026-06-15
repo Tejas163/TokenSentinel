@@ -6,13 +6,14 @@ mod request_id;
 use axum::{
     body::Body,
     extract::State,
-    http::{HeaderMap, HeaderName, Request, header},
+    http::{HeaderMap, HeaderName, HeaderValue, Request, header},
     response::Response,
     routing::get,
     Router,
 };
 use circuit_breaker::CircuitBreaker;
 use metrics::Metrics;
+use opentelemetry::propagation::TextMapPropagator;
 use redis::aio::ConnectionManager;
 use reqwest::Client;
 use std::sync::Arc;
@@ -32,11 +33,60 @@ struct AppState {
     metrics: Metrics,
 }
 
+fn init_tracing() -> Option<tracing_opentelemetry::OpenTelemetryLayer<tracing_subscriber::Registry, opentelemetry_sdk::trace::Tracer>> {
+    let endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
+        .unwrap_or_else(|_| "http://otel-collector:4317".into());
+    let service_name = std::env::var("OTEL_SERVICE_NAME")
+        .unwrap_or_else(|_| "rust-proxy".into());
+
+    let tracer = opentelemetry_otlp::new_pipeline()
+        .tracing()
+        .with_exporter(
+            opentelemetry_otlp::new_exporter()
+                .tonic()
+                .with_endpoint(endpoint),
+        )
+        .with_trace_config(
+            opentelemetry_sdk::trace::Config::default()
+                .with_resource(opentelemetry_sdk::Resource::new(vec![
+                    opentelemetry::KeyValue::new("service.name", service_name),
+                ])),
+        )
+        .install_batch(opentelemetry_sdk::runtime::Tokio);
+
+    match tracer {
+        Ok(t) => {
+            let provider = t;
+            let tracer = provider.clone();
+            opentelemetry::global::set_tracer_provider(provider);
+            Some(tracing_opentelemetry::layer().with_tracer(tracer))
+        }
+        Err(e) => {
+            eprintln!("warning: OTel init failed ({e}), tracing will continue without OTLP export");
+            None
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    let otel_layer = init_tracing();
+
+    let subscriber = tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer());
+    let subscriber = if let Some(l) = otel_layer {
+        subscriber.with(l)
+    } else {
+        subscriber
+    };
+    subscriber.init();
+
+    opentelemetry::global::set_text_map_propagator(
+        opentelemetry_sdk::propagation::TextMapCompositePropagator::new(vec![
+            Box::new(opentelemetry::trace::TraceContextPropagator::new()),
+            Box::new(opentelemetry::baggage::BaggagePropagator::new()),
+        ]),
+    );
 
     let client = Client::builder()
         .timeout(Duration::from_secs(30))
@@ -83,6 +133,28 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     tracing::info!("rust-proxy listening on :3000");
     axum::serve(listener, app).await.unwrap();
+
+    tracing::info!("shutting down, flushing OTel spans...");
+    opentelemetry::global::shutdown_tracer_provider();
+}
+
+struct HeaderMapInjector<'a>(pub &'a mut HeaderMap);
+
+impl opentelemetry::propagation::Injector for HeaderMapInjector<'_> {
+    fn set(&mut self, key: &str, value: &str) {
+        if let (Ok(name), Ok(val)) = (
+            HeaderName::from_bytes(key.as_bytes()),
+            HeaderValue::from_str(value),
+        ) {
+            self.0.insert(name, val);
+        }
+    }
+}
+
+fn inject_trace_context(headers: &mut HeaderMap) {
+    let cx = tracing_opentelemetry::current_context();
+    let propagator = opentelemetry::global::get_text_map_propagator(|p| Box::new(p.clone()));
+    propagator.inject_context(&cx, &mut HeaderMapInjector(headers));
 }
 
 async fn metrics_middleware(
@@ -188,6 +260,7 @@ async fn mcp_handler(
 
     let mut filtered_headers = parts.headers.clone();
     filtered_headers.remove("host");
+    inject_trace_context(&mut filtered_headers);
 
     let response = state
         .client
@@ -237,6 +310,8 @@ async fn handler(
         header::ACCEPT_ENCODING,
         header::HOST,
         header::USER_AGENT,
+        HeaderName::from_static("traceparent"),
+        HeaderName::from_static("tracestate"),
         HeaderName::from_static("x-request-id"),
         HeaderName::from_static("x-forwarded-for"),
         HeaderName::from_static("x-api-key"),
@@ -248,6 +323,7 @@ async fn handler(
             filtered_headers.insert(h.clone(), v.clone());
         }
     }
+    inject_trace_context(&mut filtered_headers);
 
     let metrics = state.metrics.clone();
     let client = state.client.clone();

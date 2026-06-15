@@ -2,3 +2,6 @@ transformers
 torch
 numpy
 huggingface_hub
+fastapi
+uvicorn[standard]
+pydantic

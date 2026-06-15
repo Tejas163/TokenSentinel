@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TokenSentinel — Live Leak Interception Demo</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #21262d;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --green: #3fb950;
+    --red: #f85149;
+    --orange: #d29922;
+    --blue: #58a6ff;
+    --purple: #bc8cff;
+    --cyan: #39d2c0;
+    --font: 'SF Mono','Cascadia Code','Consolas','Monaco',monospace;
+  }
+  html { font-size: 15px; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 1rem 2rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 1.1rem; font-weight: 600; letter-spacing: -0.02em; }
+  header .badge {
+    font-size: .7rem;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    padding: .2rem .6rem;
+    border-radius: 4px;
+    color: var(--green);
+  }
+  header .badge.live { background: #0f2d1a; border-color: var(--green); }
+  .container {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    gap: 1px;
+    background: var(--border);
+  }
+  @media (max-width: 900px) { .container { grid-template-columns: 1fr; } }
+  .panel { background: var(--bg); }
+
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    padding: .75rem 1.25rem;
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  .toolbar .dots { display: flex; gap: 6px; }
+  .toolbar .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .toolbar .dot.r { background: #ff5f57; }
+  .toolbar .dot.y { background: #febc2e; }
+  .toolbar .dot.g { background: #28c840; }
+  .toolbar .title {
+    font-size: .75rem;
+    color: var(--text-dim);
+    margin-left: .5rem;
+  }
+  .toolbar .spacer { flex: 1; }
+
+  .btn-trigger {
+    background: var(--red);
+    color: #fff;
+    border: none;
+    padding: .5rem 1.25rem;
+    border-radius: 6px;
+    font-family: var(--font);
+    font-size: .8rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity .15s, transform .1s;
+    letter-spacing: .02em;
+    position: relative;
+  }
+  .btn-trigger:active { transform: scale(.96); }
+  .btn-trigger:disabled { opacity: .4; cursor: not-allowed; }
+  .btn-trigger .spinner {
+    display: none;
+    width: 14px; height: 14px;
+    border: 2px solid rgba(255,255,255,.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin .6s linear infinite;
+    position: absolute; left: 50%; top: 50%;
+    margin: -7px 0 0 -7px;
+  }
+  .btn-trigger.loading .spinner { display: block; }
+  .btn-trigger.loading .label { visibility: hidden; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .btn-reset {
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    padding: .5rem 1rem;
+    border-radius: 6px;
+    font-family: var(--font);
+    font-size: .75rem;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  .btn-reset:hover { background: var(--surface2); }
+
+  #terminal {
+    padding: 1.25rem;
+    font-size: .8rem;
+    line-height: 1.65;
+    min-height: 400px;
+    max-height: 600px;
+    overflow-y: auto;
+  }
+  #terminal .line { opacity: 0; animation: fadeIn .1s forwards; white-space: pre-wrap; word-break: break-all; }
+  @keyframes fadeIn { to { opacity: 1; } }
+  .line .ts { color: var(--text-dim); }
+  .line .info { color: var(--blue); }
+  .line .ok   { color: var(--green); }
+  .line .warn { color: var(--orange); }
+  .line .err  { color: var(--red); font-weight: 600; }
+  .line .purp { color: var(--purple); }
+  .line .cyan { color: var(--cyan); }
+  .line .bold { font-weight: 600; }
+  .line .dim  { color: var(--text-dim); }
+
+  .arrow-flow {
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+    padding: .15rem 0;
+    font-size: .75rem;
+  }
+  .arrow-flow .node {
+    padding: .15rem .5rem;
+    border-radius: 3px;
+    font-size: .7rem;
+    white-space: nowrap;
+  }
+  .arrow-flow .node.proxy   { background: #1c2d3d; color: var(--blue); }
+  .arrow-flow .node.router  { background: #1c2d1a; color: var(--green); }
+  .arrow-flow .node.dash    { background: #2d1c2d; color: var(--purple); }
+  .arrow-flow .node.mcp     { background: #1c2d2d; color: var(--cyan); }
+  .arrow-flow .node.leak    { background: #3d1c1c; color: var(--red); }
+  .arrow-flow .arrow { color: var(--border); font-size: .7rem; }
+  .arrow-flow .x { color: var(--red); font-weight: 700; }
+
+  /* ---- right panel ---- */
+  .right-panel { padding: 1.25rem; display: flex; flex-direction: column; gap: 1rem; }
+  .right-panel h2 { font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; color: var(--text-dim); margin-bottom: .25rem; }
+
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: .75rem;
+    text-align: center;
+  }
+  .stat-card .val { font-size: 1.8rem; font-weight: 700; }
+  .stat-card .val.green { color: var(--green); }
+  .stat-card .val.red { color: var(--red); }
+  .stat-card .val.blue { color: var(--blue); }
+  .stat-card .label { font-size: .65rem; color: var(--text-dim); margin-top: .2rem; text-transform: uppercase; letter-spacing: .04em; }
+
+  .graph-container { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; flex: 1; min-height: 180px; }
+  .graph-container svg { width: 100%; height: 100%; display: block; }
+  .bar-label { font-size: .6rem; fill: var(--text-dim); text-anchor: middle; }
+  .bar-val { font-size: .55rem; fill: var(--text-dim); text-anchor: middle; }
+  .bar { transition: y .6s cubic-bezier(.34,1.56,.64,1), height .6s cubic-bezier(.34,1.56,.64,1); }
+
+  .flow-status {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: .75rem 1rem;
+  }
+  .flow-status .row {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .3rem 0;
+    font-size: .75rem;
+  }
+  .flow-status .indicator { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .indicator.pending { background: var(--surface2); }
+  .indicator.pass    { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .indicator.block   { background: var(--red); box-shadow: 0 0 6px var(--red); }
+  .flow-status .label { color: var(--text-dim); width: 100px; flex-shrink: 0; }
+  .flow-status .detail { color: var(--text); }
+
+  .leak-banner {
+    display: none;
+    background: linear-gradient(135deg, #2d0a0a 0%, #1c0a0a 100%);
+    border: 1px solid var(--red);
+    border-radius: 8px;
+    padding: .75rem 1rem;
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+  .leak-banner.visible { display: block; }
+  .leak-banner .title { color: var(--red); font-weight: 700; font-size: .85rem; }
+  .leak-banner .sub { color: var(--text-dim); font-size: .7rem; margin-top: .3rem; }
+  @keyframes pulse-glow { 0%,100% { box-shadow: 0 0 4px rgba(248,81,73,.3); } 50% { box-shadow: 0 0 16px rgba(248,81,73,.5); } }
+
+  .saved-banner {
+    display: none;
+    background: linear-gradient(135deg, #0a2d1a 0%, #0a1c12 100%);
+    border: 1px solid var(--green);
+    border-radius: 8px;
+    padding: .75rem 1rem;
+  }
+  .saved-banner.visible { display: block; }
+  .saved-banner .title { color: var(--green); font-weight: 700; font-size: .85rem; }
+  .saved-banner .sub { color: var(--text-dim); font-size: .7rem; margin-top: .3rem; }
+
+  footer {
+    border-top: 1px solid var(--border);
+    padding: .75rem 2rem;
+    font-size: .7rem;
+    color: var(--text-dim);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: .5rem;
+  }
+  footer a { color: var(--blue); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>&#x1f6ae; TokenSentinel</h1>
+  <span class="badge live">&#x25cf; LIVE DEMO</span>
+  <span class="badge">Leak Detection Engine v0.1</span>
+</header>
+
+<div class="container">
+  <!-- left: terminal -->
+  <div class="panel">
+    <div class="toolbar">
+      <div class="dots"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span></div>
+      <span class="title">tokensentinel/leak-demo — &#x1f4bb;</span>
+      <div class="spacer"></div>
+      <button class="btn-reset" id="resetBtn">&#x21bb; Reset</button>
+      <button class="btn-trigger" id="triggerBtn"><span class="label">&#x26a0; Trigger Infinite Loop Agent</span><span class="spinner"></span></button>
+    </div>
+    <div id="terminal"></div>
+  </div>
+
+  <!-- right: stats + graph -->
+  <div class="panel right-panel">
+    <div>
+      <h2>Interception Stats</h2>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="val red" id="statLeaks">0</div><div class="label">Leaks Caught</div></div>
+        <div class="stat-card"><div class="val green" id="statSaved">$0.00</div><div class="label">Budget Saved</div></div>
+        <div class="stat-card"><div class="val blue" id="statReqs">0</div><div class="label">Requests Blocked</div></div>
+        <div class="stat-card"><div class="val" style="color:var(--orange)" id="statPct">0%</div><div class="label">False Positive Rate</div></div>
+      </div>
+    </div>
+
+    <div>
+      <h2>Saved Budget This Run</h2>
+      <div class="graph-container">
+        <svg viewBox="0 0 320 140" preserveAspectRatio="xMidYMid meet" id="budgetGraph">
+          <text x="0" y="10" font-size="8" fill="var(--text-dim)">$ avoided</text>
+          <text x="0" y="120" font-size="7" fill="var(--text-dim)">Request</text>
+          <rect id="bar1" class="bar" x="20" y="120" width="36" height="0" rx="3" fill="var(--red)" opacity=".85"/>
+          <rect id="bar2" class="bar" x="68" y="120" width="36" height="0" rx="3" fill="var(--red)" opacity=".85"/>
+          <rect id="bar3" class="bar" x="116" y="120" width="36" height="0" rx="3" fill="var(--red)" opacity=".85"/>
+          <rect id="bar4" class="bar" x="164" y="120" width="36" height="0" rx="3" fill="var(--green)" opacity=".85"/>
+          <rect id="bar5" class="bar" x="212" y="120" width="36" height="0" rx="3" fill="var(--green)" opacity=".85"/>
+          <rect id="bar6" class="bar" x="260" y="120" width="36" height="0" rx="3" fill="var(--orange)" opacity=".85"/>
+          <text id="lb1" class="bar-label" x="38" y="135">#1</text>
+          <text id="lb2" class="bar-label" x="86" y="135">#2</text>
+          <text id="lb3" class="bar-label" x="134" y="135">#3</text>
+          <text id="lb4" class="bar-label" x="182" y="135">#4</text>
+          <text id="lb5" class="bar-label" x="230" y="135">#5</text>
+          <text id="lb6" class="bar-label" x="278" y="135">#6</text>
+        </svg>
+      </div>
+    </div>
+
+    <div>
+      <h2>Request Flow</h2>
+      <div class="flow-status" id="flowStatus">
+        <div class="row"><span class="indicator pending"></span><span class="label">Auth Check</span><span class="detail">—</span></div>
+        <div class="row"><span class="indicator pending"></span><span class="label">Rate Limit</span><span class="detail">—</span></div>
+        <div class="row"><span class="indicator pending"></span><span class="label">Budget Check</span><span class="detail">—</span></div>
+        <div class="row"><span class="indicator pending"></span><span class="label">Loop Detection</span><span class="detail">—</span></div>
+        <div class="row"><span class="indicator pending"></span><span class="label">Upstream</span><span class="detail">—</span></div>
+      </div>
+    </div>
+
+    <div class="leak-banner" id="leakBanner">
+      <div class="title">&#x26a0; LEAK DETECTED — Request Blocked</div>
+      <div class="sub">Infinite loop pattern identified at rust-proxy. Budget preserved: <span id="leakSaved">$0.00</span></div>
+      <div class="sub" style="margin-top:.15rem;font-size:.65rem">trace: rust-proxy &rarr; go-router &rarr; cost-dashboard (anomaly: 47 calls in 2s)</div>
+    </div>
+
+    <div class="saved-banner" id="savedBanner">
+      <div class="title">&#x2705; Budget Protected</div>
+      <div class="sub">This session: <span id="totalSaved">$0.00</span> saved across <span id="totalLeaks">0</span> intercepted leaks.</div>
+    </div>
+  </div>
+</div>
+
+<footer>
+  <span>TokenSentinel v0.1 — Live Leak Interception Demo</span>
+  <span><a href="https://github.com/your-org/tokensentinel" target="_blank">GitHub</a> &middot; <a href="#">Documentation</a></span>
+</footer>
+
+<script>
+(function() {
+
+const terminal = document.getElementById('terminal');
+const triggerBtn = document.getElementById('triggerBtn');
+const resetBtn = document.getElementById('resetBtn');
+const leakBanner = document.getElementById('leakBanner');
+const savedBanner = document.getElementById('savedBanner');
+const leakSaved = document.getElementById('leakSaved');
+const totalSaved = document.getElementById('totalSaved');
+const totalLeaks = document.getElementById('totalLeaks');
+const barEls = [1,2,3,4,5,6].map(i => document.getElementById('bar'+i));
+const statLeaks = document.getElementById('statLeaks');
+const statSaved = document.getElementById('statSaved');
+const statReqs = document.getElementById('statReqs');
+const statPct = document.getElementById('statPct');
+
+let running = false;
+let leakCount = 0;
+let totalSavedCents = 0;
+let reqCount = 0;
+
+const TS = () => {
+  const d = new Date();
+  return d.toLocaleTimeString('en-US', {hour12:false}) + '.' + String(d.getMilliseconds()).padStart(3,'0');
+};
+
+function term(text, cls = '') {
+  const d = document.createElement('div');
+  d.className = 'line';
+  d.innerHTML = `<span class="ts">[${TS()}]</span> ${text}`;
+  terminal.appendChild(d);
+  terminal.scrollTop = terminal.scrollHeight;
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function setFlow(idx, state, text) {
+  const rows = document.querySelectorAll('#flowStatus .row');
+  if (!rows[idx]) return;
+  const indicator = rows[idx].querySelector('.indicator');
+  const detail = rows[idx].querySelector('.detail');
+  indicator.className = 'indicator ' + state;
+  if (text) detail.textContent = text;
+}
+
+function resetFlow() {
+  for (let i = 0; i < 5; i++) setFlow(i, 'pending', '—');
+}
+
+function resetGraph() {
+  barEls.forEach(b => { b.setAttribute('y', 120); b.setAttribute('height', 0); });
+}
+
+function setBar(idx, height, val) {
+  const b = barEls[idx];
+  if (!b) return;
+  const y = 120 - height;
+  b.setAttribute('y', y);
+  b.setAttribute('height', height);
+}
+
+// Random cost between $0.12 and $2.80
+function randomCost() { return Math.round((0.12 + Math.random() * 2.68) * 100) / 100; }
+
+function updateStats() {
+  statLeaks.textContent = leakCount;
+  statSaved.textContent = '$' + (totalSavedCents / 100).toFixed(2);
+  let pct = reqCount > 0 ? Math.round(((leakCount / reqCount) * 100)) : 0;
+  if (pct > 100) pct = 100;
+  statPct.textContent = pct + '%';
+  totalSaved.textContent = '$' + (totalSavedCents / 100).toFixed(2);
+  totalLeaks.textContent = leakCount;
+}
+
+async function runLeakSimulation() {
+  if (running) return;
+  running = true;
+  triggerBtn.classList.add('loading');
+  triggerBtn.disabled = true;
+  leakBanner.classList.remove('visible');
+  resetFlow();
+
+  reqCount++;
+
+  // ---- stage 1: request ingress ----
+  term('<span class="bold">Request ingress</span> <span class="dim">POST /v1/chat/completions</span>', '');
+  term('<span class="arrow-flow"><span class="node proxy">rust-proxy:3000</span><span class="arrow">&rarr;</span><span class="dim">auth check</span></span>', '');
+  await sleep(120);
+  setFlow(0, 'pass', 'dev-key-123 (engineering)');
+  await sleep(80);
+
+  // ---- stage 2: rate limit ----
+  term('<span class="arrow-flow"><span class="node proxy">rust-proxy</span><span class="arrow">&rarr;</span><span class="dim">rate limit check</span></span>', '');
+  await sleep(100);
+  setFlow(1, 'pass', '87/100 rps');
+  await sleep(60);
+
+  // ---- stage 3: forward to go-router ----
+  term('<span class="info">forward &rarr; go-router:8080</span>', '');
+  term('<span class="arrow-flow"><span class="node proxy">rust-proxy</span><span class="arrow">&rarr;</span><span class="node router">go-router</span></span>', '');
+  await sleep(150);
+
+  // ---- stage 4: budget check (cost-dashboard) ----
+  term('<span class="arrow-flow"><span class="node router">go-router</span><span class="arrow">&rarr;</span><span class="node dash">cost-dashboard</span><span class="dim"> budget check</span></span>', '');
+  await sleep(200);
+  setFlow(2, 'pass', '$32.41 used / $500 limit');
+  await sleep(80);
+
+  // ---- stage 5: loop detection triggers ----
+  term('<span class="warn">anomaly detection: historical pattern scan...</span>', '');
+  await sleep(300);
+
+  // Show rapid-fire requests in terminal
+  for (let i = 0; i < 3; i++) {
+    term('<span class="arrow-flow"><span class="dim">req #' + (18+i) + '</span> <span class="node router">go-router</span><span class="arrow">&rarr;</span><span class="node dash">cost-dashboard</span> <span class="dim">' + (i*7+42)+'ms</span></span>', '');
+    await sleep(80);
+  }
+
+  // ---- stage 6: LEAK DETECTED ----
+  term('');
+  term('<span class="err bold">&#x26a0; LEAK DETECTED — Infinite Loop Pattern</span>');
+  term('<span class="err">rust-proxy → go-router → cost-dashboard: 47 identical requests in 2.1s</span>');
+  term('<span class="warn">budget leak score: 0.94 (threshold: 0.70)</span>');
+  await sleep(250);
+  setFlow(3, 'block', '47 calls in 2.1s — BLOCKED');
+  setFlow(4, 'block', 'CANCELLED (leak detected)');
+  await sleep(150);
+
+  // Blocked arrow flow
+  term('<span class="arrow-flow"><span class="node proxy">rust-proxy</span><span class="arrow">&rarr;</span><span class="node router">go-router</span><span class="arrow">&rarr;</span><span class="node dash">cost-dashboard</span><span class="x"> &#x2717;</span><span class="node leak">LEAK_DETECTED</span></span>', '');
+
+  const cost = randomCost();
+  const cents = Math.round(cost * 100);
+  leakCount++;
+  totalSavedCents += cents;
+  leakSaved.textContent = '$' + cost.toFixed(2);
+
+  term('');
+  term('<span class="ok bold">&#x2714; Budget preserved: $' + cost.toFixed(2) + ' not wasted</span>');
+  term('<span class="dim">trace: 0a1b2c3d4e5f — LeakDetected at anomaly check node</span>');
+
+  // ---- graph update ----
+  const h1 = Math.round(Math.random() * 40 + 30);
+  const h2 = Math.round(Math.random() * 30 + 20);
+  const h3 = Math.round(Math.random() * 35 + 25);
+  const h4 = Math.round(Math.random() * 60 + 50);
+  const h5 = Math.round(Math.random() * 55 + 45);
+  const h6 = Math.round(Math.random() * 45 + 35);
+
+  // shift all bars right, put new leak at left
+  const heights = [h1, h2, h3, h4, h5, h6];
+  barEls.forEach((b, i) => {
+    setBar(i, heights[i], 0);
+  });
+
+  // ---- update saved banner ----
+  savedBanner.classList.add('visible');
+  leakBanner.classList.add('visible');
+  updateStats();
+
+  triggerBtn.classList.remove('loading');
+  triggerBtn.disabled = false;
+  running = false;
+}
+
+function resetAll() {
+  leakBanner.classList.remove('visible');
+  savedBanner.classList.remove('visible');
+  resetFlow();
+  terminal.innerHTML = '';
+  term('<span class="dim">TokenSentinel v0.1 — Live Leak Interception Demo</span>');
+  term('<span class="dim">Click &ldquo;Trigger Infinite Loop Agent&rdquo; to simulate a runaway agent.</span>');
+  term('');
+  term('<span class="dim">Architecture: rust-proxy → go-router → cost-dashboard (leak detection) → upstream</span>');
+  resetGraph();
+  if (!running) {
+    leakCount = 0;
+    totalSavedCents = 0;
+    reqCount = 0;
+    updateStats();
+  }
+}
+
+triggerBtn.addEventListener('click', runLeakSimulation);
+resetBtn.addEventListener('click', resetAll);
+
+// Initial terminal output
+resetAll();
+
+})();
+</script>
+</body>
+</html>
