@@ -1,6 +1,5 @@
 {
-  "name": "tokensentinel-sandbox",
-  "buildCommand": false,
+  "buildCommand": null,
   "outputDirectory": ".",
   "framework": null
 }
