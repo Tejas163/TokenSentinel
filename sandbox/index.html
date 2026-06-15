@@ -213,7 +213,7 @@ const statOpt=document.getElementById('statOptimized');
 const banners={leak:document.getElementById('bannerLeak'),budget:document.getElementById('bannerBudget'),rate:document.getElementById('bannerRate'),optimize:document.getElementById('bannerOptimize'),audit:document.getElementById('bannerAudit')};
 const TS=()=>{const d=new Date();return d.toLocaleTimeString('en-US',{hour12:false})+'.'+String(d.getMilliseconds()).padStart(3,'0')};
 
-let running=false,incidentCount=0,totalCents=0,reqCount=0,optSavedCents=0,totalIncidents=0;
+let running=false,incidentCount=0,totalCents=0,reqCount=0,optSavedCents=0,totalIncidents=0,lastAvoided=0;
 
 function term(t,c){
   const d=document.createElement('div');
@@ -265,11 +265,11 @@ async function runScenario(type){
     b.disabled=true;
   });
   reqCount++;
-  const detectedCents=Math.round(rcost(0.15,3.50)*100);
-  totalCents+=detectedCents;
 
   const scenarios={
     leak:async()=>{
+      const avoidedCents=Math.round(48+Math.random()*152)*100;
+      totalCents+=avoidedCents;
       term('<span class="bold">POST /v1/chat/completions</span> <span class="dim">key=dev-key-123 team=engineering</span>');
       term('<span class="arrow-flow"><span class="node proxy">rust-proxy:3000</span><span class="arrow">&rarr;</span><span class="dim">auth check</span></span>');
       await sleep(100);
@@ -301,13 +301,15 @@ async function runScenario(type){
       await sleep(120);
       term('<span class="arrow-flow"><span class="node proxy">rust-proxy</span><span class="arrow">&rarr;</span><span class="node router">go-router</span><span class="arrow">&rarr;</span><span class="node dash">cost-dashboard</span><span class="x"> \u2717</span><span class="node leak">LEAK_DETECTED</span></span>');
       term('');
-      term('<span class="ok bold">\u2714 Budget preserved: $'+(detectedCents/100).toFixed(2)+' not wasted</span>');
+      term('<span class="ok bold">\u2714 Budget preserved: $'+(avoidedCents/100).toFixed(2)+' not wasted</span>');
       term('<span class="dim">trace: a'+(reqCount*100)+'f \u2014 LeakDetected</span>');
-      incidentCount++;totalIncidents++;
-      document.getElementById('bannerLeakSaved').textContent='$'+(detectedCents/100).toFixed(2);
+      incidentCount++;totalIncidents++;lastAvoided=avoidedCents;
+      document.getElementById('bannerLeakSaved').textContent='$'+(avoidedCents/100).toFixed(2);
       banners.leak.classList.add('visible');
     },
     budget:async()=>{
+      const avoidedCents=Math.round(1500+Math.random()*3500)*100;
+      totalCents+=avoidedCents;
       term('<span class="bold">POST /v1/chat/completions</span> <span class="dim">key=prod-key-7 team=ml-research</span>');
       term('<span class="arrow-flow"><span class="node proxy">rust-proxy:3000</span><span class="arrow">&rarr;</span><span class="dim">auth check</span></span>');
       await sleep(90);
@@ -335,13 +337,15 @@ async function runScenario(type){
         term('<span class="err">opsgenie incident INC-2026-0'+reqCount+' created (P2)</span>');
       }
       await sleep(150);
-      term('<span class="ok bold">\u2714 Prevented $'+(detectedCents/100).toFixed(2)+' overage cost</span>');
+      term('<span class="ok bold">\u2714 Prevented $'+(avoidedCents/100).toFixed(2)+' projected overage cost</span>');
       term('<span class="dim">rule: hard_cap=true, action=deny, alert_channel=slack+opsgenie</span>');
-      incidentCount++;totalIncidents++;
+      incidentCount++;totalIncidents++;lastAvoided=avoidedCents;
       document.getElementById('bannerBudgetText').textContent='Team ml-research: '+fmt$(usedAmt)+' / '+fmt$(budgetLimit)+' ('+pct+'%). Auto-escalated to SRE.';
       banners.budget.classList.add('visible');
     },
     rate:async()=>{
+      const avoidedCents=Math.round(700+Math.random()*2900);
+      totalCents+=avoidedCents;
       term('<span class="bold">POST /v1/chat/completions</span> <span class="dim">key=dev-key-123 team=engineering</span>');
       term('<span class="arrow-flow"><span class="node proxy">rust-proxy:3000</span><span class="arrow">&rarr;</span><span class="dim">auth check</span></span>');
       await sleep(80);
@@ -360,16 +364,15 @@ async function runScenario(type){
       term('<span class="err bold">\u26a1 RATE LIMIT EXCEEDED \u2014 242 requests dropped</span>');
       term('<span class="err">key dev-key-123: 342 req/s (limit: 100). Excess queued + rejected.</span>');
       await sleep(100);
-      const spikeCost=rcost(1.20,5.80);
-      term('<span class="ok bold">\u2714 Saved $'+(spikeCost).toFixed(2)+' in potential upstream costs</span>');
+      term('<span class="ok bold">\u2714 Saved $'+(avoidedCents/100).toFixed(2)+' in potential upstream costs</span>');
       term('<span class="dim">policy: leaky_bucket burst=150 rate=100/s</span>');
-      const sc=Math.round(spikeCost*100);
-      totalCents+=sc;
-      incidentCount++;totalIncidents++;
-      document.getElementById('bannerRateText').textContent='Key dev-key-123: 342/100 rps burst. 242 requests dropped. $'+(spikeCost).toFixed(2)+' upstream cost avoided.';
+      incidentCount++;totalIncidents++;lastAvoided=avoidedCents;
+      document.getElementById('bannerRateText').textContent='Key dev-key-123: 342/100 rps burst. 242 requests dropped. $'+(avoidedCents/100).toFixed(2)+' upstream cost avoided.';
       banners.rate.classList.add('visible');
     },
     anomaly:async()=>{
+      const avoidedCents=Math.round(200+Math.random()*400)*100;
+      totalCents+=avoidedCents;
       term('<span class="bold">GET /api/dashboard/summary?period=7d</span> <span class="dim">key=admin-key team=engineering</span>');
       term('<span class="arrow-flow"><span class="node proxy">rust-proxy</span><span class="arrow">&rarr;</span><span class="node router">go-router</span><span class="arrow">&rarr;</span><span class="node dash">cost-dashboard</span></span>');
       await sleep(120);
@@ -390,11 +393,9 @@ async function runScenario(type){
       term('');
       term('<span class="ok bold">\u2705 Anomaly Escalated \u2014 Incident INC-2026-0419</span>');
       term('<span class="dim">actions: slack #eng-alerts, auto-disable pipeline cron, page SRE</span>');
-      const saved=rcost(2.50,8.00);
-      totalCents+=Math.round(saved*100);
-      incidentCount++;totalIncidents++;
-      term('<span class="ok bold">\u2714 Estimated $'+(saved).toFixed(2)+'/hr until remediation</span>');
-      document.getElementById('bannerLeakSaved').textContent='$'+(saved).toFixed(2)+'/hr';
+      term('<span class="ok bold">\u2714 Estimated $'+(avoidedCents/100).toFixed(2)+' avoided until remediation</span>');
+      document.getElementById('bannerLeakSaved').textContent='$'+(avoidedCents/100).toFixed(2);
+      incidentCount++;totalIncidents++;lastAvoided=avoidedCents;
       banners.leak.classList.add('visible');
     },
     optimize:async()=>{
@@ -418,12 +419,14 @@ async function runScenario(type){
       setFlow(4,'pass','savings: $2,410.00/mo');
       const opt=241000;
       optSavedCents+=opt;
-      incidentCount++;totalIncidents++;
+      incidentCount++;totalIncidents++;lastAvoided=opt;
       document.getElementById('bannerOptimizeVal').textContent='2,410.00';
       document.getElementById('bannerOptimizeText').textContent='Switch gpt-4-turbo \u2192 gpt-4o-mini for summarization pipeline. 94% cost reduction = $28,920/yr.';
       banners.optimize.classList.add('visible');
     },
     audit:async()=>{
+      const avoidedCents=Math.round(500+Math.random()*2000)*100;
+      totalCents+=avoidedCents;
       term('<span class="bold">SECURITY SCAN</span> <span class="dim">automated key leak detection</span>');
       await sleep(120);
       term('<span class="arrow-flow"><span class="node audit">audit-engine</span><span class="arrow">&rarr;</span><span class="node dash">cost-dashboard</span><span class="dim"> scanning all keys</span></span>');
@@ -443,7 +446,7 @@ async function runScenario(type){
       term('');
       term('<span class="ok bold">\u2705 Zero abuse detected \u2014 key rotated within 14min</span>');
       term('<span class="dim">new key: prod-deploy-key-v2 | issued: fresh</span>');
-      incidentCount++;totalIncidents++;
+      incidentCount++;totalIncidents++;lastAvoided=avoidedCents;
       document.getElementById('bannerAuditText').textContent='prod-deploy-key found in public git history. Auto-rotated. 0 abuse.';
       banners.audit.classList.add('visible');
     }
@@ -451,7 +454,7 @@ async function runScenario(type){
 
   if(scenarios[type]){
     await scenarios[type]();
-    pushBar(detectedCents/100,type);
+    pushBar(lastAvoided/100,type);
     updateStats();
   }
 
@@ -476,7 +479,7 @@ resetBtn.addEventListener('click',()=>{
   term('<span class="dim">Architecture: rust-proxy \u2192 go-router \u2192 cost-dashboard (detection) \u2192 upstream</span>');
   resetGraph();
   if(!running){
-    incidentCount=0;totalCents=0;reqCount=0;optSavedCents=0;totalIncidents=0;
+    incidentCount=0;totalCents=0;reqCount=0;optSavedCents=0;totalIncidents=0;lastAvoided=0;
     updateStats();
   }
 });
