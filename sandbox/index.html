@@ -184,7 +184,7 @@
       <div class="sub" id="bannerRateText">Key dev-key-123 burst at 342/100 rps. 242 requests dropped.</div>
     </div>
     <div class="banner banner-ok" id="bannerOptimize">
-      <div class="title">&#x2705; OPTIMIZATION FOUND — Switch Saved $<span id="bannerOptimizeVal">182.40</span></div>
+      <div class="title">&#x2705; OPTIMIZATION FOUND — Switch Saved $<span id="bannerOptimizeVal">2,410.00</span></div>
       <div class="sub" id="bannerOptimizeText">Switch gpt-4-turbo→gpt-4o-mini for summarization tasks. 73% cost reduction.</div>
     </div>
     <div class="banner banner-ok" id="bannerAudit">
@@ -317,25 +317,28 @@ async function runScenario(type){
       await sleep(100);
       term('<span class="arrow-flow"><span class="node router">go-router</span><span class="arrow">&rarr;</span><span class="node dash">cost-dashboard</span><span class="dim"> budget check</span></span>');
       await sleep(150);
-      const used=Math.round(350+Math.random()*200);
-      const pct=Math.round((used/500)*100);
-      term('<span class="warn">budget: team ml-research $'+(used/100).toFixed(2)+' / $500.00 ('+pct+'%)</span>');
+      const budgetLimit=5000000;
+      const usedAmt=Math.round(4800000+Math.random()*750000);
+      const pct=Math.round((usedAmt/budgetLimit)*100);
+      function fmt$(c){return '$'+(c/100).toLocaleString('en-US',{minimumFractionDigits:2})}
+      term('<span class="warn">budget: team ml-research '+fmt$(usedAmt)+' / '+fmt$(budgetLimit)+' ('+pct+'%)</span>');
       await sleep(100);
-      setFlow(2,'block','$'+(used/100).toFixed(2)+'/$500 \u2014 OVER');
+      setFlow(2,'block',fmt$(usedAmt)+'/'+fmt$(budgetLimit)+' \u2014 OVER');
       await sleep(100);
       setFlow(3,'pass','budget rule #4 triggered');
       setFlow(4,'block','DENIED (budget)');
       term('');
       term('<span class="err bold">\u26a0 BUDGET EXCEEDED \u2014 Request Blocked</span>');
-      term('<span class="err">team ml-research: $'+(used/100).toFixed(2)+' used (limit: $500.00)</span>');
-      if(pct>120){
-        term('<span class="err">auto-escalation: alert sent to #finops (slack)</span>');
+      term('<span class="err">team ml-research: '+fmt$(usedAmt)+' used (limit: '+fmt$(budgetLimit)+')</span>');
+      if(pct>110){
+        term('<span class="err">auto-escalation: alert sent to #finops (slack) + SRE paged</span>');
+        term('<span class="err">opsgenie incident INC-2026-0'+reqCount+' created (P2)</span>');
       }
       await sleep(150);
       term('<span class="ok bold">\u2714 Prevented $'+(detectedCents/100).toFixed(2)+' overage cost</span>');
-      term('<span class="dim">rule: hard_cap=true, action=deny, alert_channel=slack</span>');
+      term('<span class="dim">rule: hard_cap=true, action=deny, alert_channel=slack+opsgenie</span>');
       incidentCount++;totalIncidents++;
-      document.getElementById('bannerBudgetText').textContent='Team ml-research used '+pct+'% of monthly budget. Request denied.';
+      document.getElementById('bannerBudgetText').textContent='Team ml-research: '+fmt$(usedAmt)+' / '+fmt$(budgetLimit)+' ('+pct+'%). Auto-escalated to SRE.';
       banners.budget.classList.add('visible');
     },
     rate:async()=>{
@@ -408,16 +411,16 @@ async function runScenario(type){
       term('<span class="cyan">service=summarization | current=gpt-4-turbo ($2.50/1M input)</span>');
       term('<span class="cyan">recommendation=switch to gpt-4o-mini ($0.15/1M input) \u2014 94% cost reduction</span>');
       await sleep(150);
-      term('<span class="dim">expected impact: -$182.40/mo | quality delta: -2% (acceptable)</span>');
+      term('<span class="dim">expected impact: -$2,410.00/mo | quality delta: -2% (acceptable)</span>');
       term('<span class="dim">auto-apply: scheduled for next billing cycle</span>');
       await sleep(100);
       setFlow(3,'pass','what-if validated');
-      setFlow(4,'pass','savings: $182.40/mo');
-      const opt=18240;
+      setFlow(4,'pass','savings: $2,410.00/mo');
+      const opt=241000;
       optSavedCents+=opt;
       incidentCount++;totalIncidents++;
-      document.getElementById('bannerOptimizeVal').textContent='182.40';
-      document.getElementById('bannerOptimizeText').textContent='Switch gpt-4-turbo \u2192 gpt-4o-mini for summarization. 94% cost reduction.';
+      document.getElementById('bannerOptimizeVal').textContent='2,410.00';
+      document.getElementById('bannerOptimizeText').textContent='Switch gpt-4-turbo \u2192 gpt-4o-mini for summarization pipeline. 94% cost reduction = $28,920/yr.';
       banners.optimize.classList.add('visible');
     },
     audit:async()=>{
