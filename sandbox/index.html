@@ -183,6 +183,10 @@
       <div class="title">&#x26a1; RATE LIMIT EXCEEDED — Throttled</div>
       <div class="sub" id="bannerRateText">Key dev-key-123 burst at 342/100 rps. 242 requests dropped.</div>
     </div>
+    <div class="banner banner-ok" id="bannerAnomaly">
+      <div class="title">&#x1f50a; ANOMALY DETECTED — 3-Sigma Spend Spike</div>
+      <div class="sub">gpt-4-turbo +340% vs rolling avg. <span id="bannerAnomalySaved">$0.00</span> preserved.</div>
+    </div>
     <div class="banner banner-ok" id="bannerOptimize">
       <div class="title">&#x2705; OPTIMIZATION FOUND — Switch Saved $<span id="bannerOptimizeVal">2,410.00</span></div>
       <div class="sub" id="bannerOptimizeText">Switch gpt-4-turbo→gpt-4o-mini for summarization tasks. 73% cost reduction.</div>
@@ -210,7 +214,7 @@ const statInc=document.getElementById('statIncidents');
 const statSaved=document.getElementById('statSaved');
 const statReqs=document.getElementById('statReqs');
 const statOpt=document.getElementById('statOptimized');
-const banners={leak:document.getElementById('bannerLeak'),budget:document.getElementById('bannerBudget'),rate:document.getElementById('bannerRate'),optimize:document.getElementById('bannerOptimize'),audit:document.getElementById('bannerAudit')};
+const banners={leak:document.getElementById('bannerLeak'),budget:document.getElementById('bannerBudget'),rate:document.getElementById('bannerRate'),anomaly:document.getElementById('bannerAnomaly'),optimize:document.getElementById('bannerOptimize'),audit:document.getElementById('bannerAudit')};
 const TS=()=>{const d=new Date();return d.toLocaleTimeString('en-US',{hour12:false})+'.'+String(d.getMilliseconds()).padStart(3,'0')};
 
 let running=false,incidentCount=0,totalCents=0,reqCount=0,optSavedCents=0,totalIncidents=0,lastAvoided=0;
@@ -233,9 +237,9 @@ function resetFlow(){for(let i=0;i<5;i++)setFlow(i,'pending','\u2014')}
 function hideAllBanners(){Object.values(banners).forEach(b=>b.classList.remove('visible'))}
 function setBar(i,h){const b=barEls[i];if(!b)return;b.setAttribute('y',115-h);b.setAttribute('height',h)}
 function resetGraph(){barEls.forEach(b=>{b.setAttribute('y',115);b.setAttribute('height',0)})}
-function rcost(low,high){return Math.round((low+Math.random()*(high-low))*100)/100}
+
 function pushBar(cost,type){
-  const colors={leak:'var(--red)',budget:'var(--orange)',rate:'#ff79b0',optimize:'var(--green)',audit:'var(--blue)'};
+  const colors={leak:'var(--red)',budget:'var(--orange)',rate:'#ff79b0',anomaly:'var(--purple)',optimize:'var(--green)',audit:'var(--blue)'};
   const hs=barEls.map(b=>parseInt(b.getAttribute('height'))||0);
   for(let i=1;i<6;i++)setBar(i-1,hs[i]);
   const h=Math.min(85,Math.round(cost*22+5));
@@ -394,9 +398,9 @@ async function runScenario(type){
       term('<span class="ok bold">\u2705 Anomaly Escalated \u2014 Incident INC-2026-0419</span>');
       term('<span class="dim">actions: slack #eng-alerts, auto-disable pipeline cron, page SRE</span>');
       term('<span class="ok bold">\u2714 Estimated $'+(avoidedCents/100).toFixed(2)+' avoided until remediation</span>');
-      document.getElementById('bannerLeakSaved').textContent='$'+(avoidedCents/100).toFixed(2);
+      document.getElementById('bannerAnomalySaved').textContent='$'+(avoidedCents/100).toFixed(2);
       incidentCount++;totalIncidents++;lastAvoided=avoidedCents;
-      banners.leak.classList.add('visible');
+      banners.anomaly.classList.add('visible');
     },
     optimize:async()=>{
       term('<span class="bold">POST /api/prescriptive/assessments/12/run</span> <span class="dim">key=admin-key</span>');
@@ -473,6 +477,7 @@ scenarioBtns.forEach(btn=>{
 resetBtn.addEventListener('click',()=>{
   hideAllBanners();
   resetFlow();
+  scenarioBtns.forEach(b=>b.classList.remove('active'));
   terminal.innerHTML='';
   term('<span class="dim">TokenSentinel v0.1 \u2014 Enterprise Cost Control Demo</span>');
   term('<span class="dim">Pick a scenario above to see TokenSentinel in action.</span>');
