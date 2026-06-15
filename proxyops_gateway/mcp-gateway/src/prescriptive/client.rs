@@ -1,6 +1,5 @@
 use std::sync::LazyLock;
 use std::time::Duration;
-use opentelemetry::propagation::TextMapPropagator;
 use reqwest::Client;
 
 static DASHBOARD_URL: LazyLock<String> = LazyLock::new(|| {
@@ -18,23 +17,24 @@ fn http_client() -> Client {
         .expect("reqwest client")
 }
 
-struct HeaderMapInjector<'a>(pub &'a mut reqwest::header::HeaderMap);
-
-impl opentelemetry::propagation::Injector for HeaderMapInjector<'_> {
-    fn set(&mut self, key: &str, value: &str) {
-        if let (Ok(name), Ok(val)) = (
-            reqwest::header::HeaderName::from_bytes(key.as_bytes()),
-            reqwest::header::HeaderValue::from_str(value),
-        ) {
-            self.0.insert(name, val);
-        }
-    }
-}
-
-fn inject_trace_context(headers: &mut reqwest::header::HeaderMap) {
+fn trace_headers() -> reqwest::header::HeaderMap {
+    use opentelemetry::propagation::Injector;
     let cx = tracing_opentelemetry::current_context();
     let propagator = opentelemetry::global::get_text_map_propagator(|p| Box::new(p.clone()));
-    propagator.inject_context(&cx, &mut HeaderMapInjector(headers));
+    let mut headers = reqwest::header::HeaderMap::new();
+    struct Inject<'a>(&'a mut reqwest::header::HeaderMap);
+    impl Injector for Inject<'_> {
+        fn set(&mut self, key: &str, value: &str) {
+            if let (Ok(name), Ok(val)) = (
+                reqwest::header::HeaderName::from_bytes(key.as_bytes()),
+                reqwest::header::HeaderValue::from_str(value),
+            ) {
+                self.0.insert(name, val);
+            }
+        }
+    }
+    propagator.inject_context(&cx, &mut Inject(&mut headers));
+    headers
 }
 
 async fn get(path: &str, team: Option<&str>) -> Result<serde_json::Value, String> {
@@ -45,8 +45,7 @@ async fn get(path: &str, team: Option<&str>) -> Result<serde_json::Value, String
         if attempt > 0 {
             tokio::time::sleep(Duration::from_millis(100 * 2u64.pow(attempt as u32))).await;
         }
-        let mut req = client.get(&url);
-        inject_trace_context(req.headers_mut());
+        let mut req = client.get(&url).headers(trace_headers());
         if !DASHBOARD_API_KEY.is_empty() {
             req = req.header("X-Api-Key", &*DASHBOARD_API_KEY);
         }
@@ -79,8 +78,7 @@ async fn post(path: &str, body: &serde_json::Value, team: Option<&str>) -> Resul
         if attempt > 0 {
             tokio::time::sleep(Duration::from_millis(100 * 2u64.pow(attempt as u32))).await;
         }
-        let mut req = client.post(&url).json(body);
-        inject_trace_context(req.headers_mut());
+        let mut req = client.post(&url).headers(trace_headers()).json(body);
         if !DASHBOARD_API_KEY.is_empty() {
             req = req.header("X-Api-Key", &*DASHBOARD_API_KEY);
         }
