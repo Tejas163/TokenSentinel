@@ -19,21 +19,22 @@ fn http_client() -> Client {
 
 fn trace_headers() -> reqwest::header::HeaderMap {
     use opentelemetry::propagation::Injector;
-    let cx = tracing_opentelemetry::current_context();
-    let propagator = opentelemetry::global::get_text_map_propagator(|p| Box::new(p.clone()));
+    let cx = opentelemetry::Context::current();
     let mut headers = reqwest::header::HeaderMap::new();
     struct Inject<'a>(&'a mut reqwest::header::HeaderMap);
     impl Injector for Inject<'_> {
-        fn set(&mut self, key: &str, value: &str) {
+        fn set(&mut self, key: &str, value: String) {
             if let (Ok(name), Ok(val)) = (
                 reqwest::header::HeaderName::from_bytes(key.as_bytes()),
-                reqwest::header::HeaderValue::from_str(value),
+                reqwest::header::HeaderValue::from_str(&value),
             ) {
                 self.0.insert(name, val);
             }
         }
     }
-    propagator.inject_context(&cx, &mut Inject(&mut headers));
+    opentelemetry::global::get_text_map_propagator(|p| {
+        p.inject_context(&cx, &mut Inject(&mut headers));
+    });
     headers
 }
 

@@ -13,7 +13,8 @@ use axum::{
 };
 use circuit_breaker::CircuitBreaker;
 use metrics::Metrics;
-use opentelemetry::propagation::TextMapPropagator;
+use opentelemetry::trace::TracerProvider;
+use opentelemetry_otlp::WithExportConfig;
 use redis::aio::ConnectionManager;
 use reqwest::Client;
 use std::sync::Arc;
@@ -33,7 +34,7 @@ struct AppState {
     metrics: Metrics,
 }
 
-fn init_tracing() -> Option<tracing_opentelemetry::OpenTelemetryLayer<tracing_subscriber::Registry, opentelemetry_sdk::trace::Tracer>> {
+fn init_tracing() -> tracing_opentelemetry::OpenTelemetryLayer<tracing_subscriber::Registry, opentelemetry_sdk::trace::Tracer> {
     let endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
         .unwrap_or_else(|_| "http://otel-collector:4317".into());
     let service_name = std::env::var("OTEL_SERVICE_NAME")
@@ -55,15 +56,16 @@ fn init_tracing() -> Option<tracing_opentelemetry::OpenTelemetryLayer<tracing_su
         .install_batch(opentelemetry_sdk::runtime::Tokio);
 
     match tracer {
-        Ok(t) => {
-            let provider = t;
-            let tracer = provider.clone();
+        Ok(provider) => {
+            let tracer = provider.tracer("proxyops-proxy");
             opentelemetry::global::set_tracer_provider(provider);
-            Some(tracing_opentelemetry::layer().with_tracer(tracer))
+            tracing_opentelemetry::layer().with_tracer(tracer)
         }
         Err(e) => {
             eprintln!("warning: OTel init failed ({e}), tracing will continue without OTLP export");
-            None
+            let provider = opentelemetry_sdk::trace::TracerProvider::builder().build();
+            let tracer = provider.tracer("proxyops-proxy");
+            tracing_opentelemetry::layer().with_tracer(tracer)
         }
     }
 }
@@ -72,19 +74,15 @@ fn init_tracing() -> Option<tracing_opentelemetry::OpenTelemetryLayer<tracing_su
 async fn main() {
     let otel_layer = init_tracing();
 
-    let subscriber = tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer());
-    let subscriber = if let Some(l) = otel_layer {
-        subscriber.with(l)
-    } else {
-        subscriber
-    };
-    subscriber.init();
+    tracing_subscriber::registry()
+        .with(otel_layer)
+        .with(tracing_subscriber::fmt::layer())
+        .init();
 
     opentelemetry::global::set_text_map_propagator(
-        opentelemetry_sdk::propagation::TextMapCompositePropagator::new(vec![
-            Box::new(opentelemetry::trace::TraceContextPropagator::new()),
-            Box::new(opentelemetry::baggage::BaggagePropagator::new()),
+        opentelemetry::propagation::TextMapCompositePropagator::new(vec![
+            Box::new(opentelemetry_sdk::propagation::TraceContextPropagator::new()),
+            Box::new(opentelemetry_sdk::propagation::BaggagePropagator::new()),
         ]),
     );
 
@@ -141,10 +139,10 @@ async fn main() {
 struct HeaderMapInjector<'a>(pub &'a mut HeaderMap);
 
 impl opentelemetry::propagation::Injector for HeaderMapInjector<'_> {
-    fn set(&mut self, key: &str, value: &str) {
+    fn set(&mut self, key: &str, value: String) {
         if let (Ok(name), Ok(val)) = (
             HeaderName::from_bytes(key.as_bytes()),
-            HeaderValue::from_str(value),
+            HeaderValue::from_str(&value),
         ) {
             self.0.insert(name, val);
         }
@@ -152,9 +150,10 @@ impl opentelemetry::propagation::Injector for HeaderMapInjector<'_> {
 }
 
 fn inject_trace_context(headers: &mut HeaderMap) {
-    let cx = tracing_opentelemetry::current_context();
-    let propagator = opentelemetry::global::get_text_map_propagator(|p| Box::new(p.clone()));
-    propagator.inject_context(&cx, &mut HeaderMapInjector(headers));
+    let cx = opentelemetry::Context::current();
+    opentelemetry::global::get_text_map_propagator(|p| {
+        p.inject_context(&cx, &mut HeaderMapInjector(headers));
+    });
 }
 
 async fn metrics_middleware(

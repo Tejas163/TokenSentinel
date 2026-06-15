@@ -1,9 +1,10 @@
 use mcp_gateway::create_app;
 use mcp_gateway::prescriptive::catalog::{CatalogState, start_catalog_refresh};
-use opentelemetry::propagation::TextMapPropagator;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use opentelemetry::trace::TracerProvider;
+use opentelemetry_otlp::WithExportConfig;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
 
-fn init_tracing() -> Option<tracing_opentelemetry::OpenTelemetryLayer<tracing_subscriber::Registry, opentelemetry_sdk::trace::Tracer>> {
+fn init_tracing() -> tracing_opentelemetry::OpenTelemetryLayer<tracing_subscriber::Registry, opentelemetry_sdk::trace::Tracer> {
     let endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
         .unwrap_or_else(|_| "http://otel-collector:4317".into());
     let service_name = std::env::var("OTEL_SERVICE_NAME")
@@ -25,15 +26,16 @@ fn init_tracing() -> Option<tracing_opentelemetry::OpenTelemetryLayer<tracing_su
         .install_batch(opentelemetry_sdk::runtime::Tokio);
 
     match tracer {
-        Ok(t) => {
-            let provider = t;
-            let tracer = provider.clone();
+        Ok(provider) => {
+            let tracer = provider.tracer("mcp-gateway");
             opentelemetry::global::set_tracer_provider(provider);
-            Some(tracing_opentelemetry::layer().with_tracer(tracer))
+            tracing_opentelemetry::layer().with_tracer(tracer)
         }
         Err(e) => {
             eprintln!("warning: OTel init failed ({e}), tracing will continue without OTLP export");
-            None
+            let provider = opentelemetry_sdk::trace::TracerProvider::builder().build();
+            let tracer = provider.tracer("mcp-gateway");
+            tracing_opentelemetry::layer().with_tracer(tracer)
         }
     }
 }
@@ -42,19 +44,16 @@ fn init_tracing() -> Option<tracing_opentelemetry::OpenTelemetryLayer<tracing_su
 async fn main() {
     let otel_layer = init_tracing();
 
-    let subscriber = tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer().with_env_filter("mcp_gateway=debug,tower_http=debug"));
-    let subscriber = if let Some(l) = otel_layer {
-        subscriber.with(l)
-    } else {
-        subscriber
-    };
-    subscriber.init();
+    let env_filter = tracing_subscriber::EnvFilter::new("mcp_gateway=debug,tower_http=debug");
+    tracing_subscriber::registry()
+        .with(otel_layer)
+        .with(tracing_subscriber::fmt::layer().with_filter(env_filter))
+        .init();
 
     opentelemetry::global::set_text_map_propagator(
-        opentelemetry_sdk::propagation::TextMapCompositePropagator::new(vec![
-            Box::new(opentelemetry::trace::TraceContextPropagator::new()),
-            Box::new(opentelemetry::baggage::BaggagePropagator::new()),
+        opentelemetry::propagation::TextMapCompositePropagator::new(vec![
+            Box::new(opentelemetry_sdk::propagation::TraceContextPropagator::new()),
+            Box::new(opentelemetry_sdk::propagation::BaggagePropagator::new()),
         ]),
     );
 
