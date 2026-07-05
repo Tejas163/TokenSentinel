@@ -49,7 +49,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: actions/download-artifact@fa0a91b85d4f688e512238c18b37a13e8f5c5e91 # v4
+      - - uses: actions/download-artifact@v4
         with:
           pattern: tokensentinel-*
           path: artifacts
