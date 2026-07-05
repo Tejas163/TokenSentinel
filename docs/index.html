@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TokenSentinel — LLM Cost Optimizer</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #0a0c10;
+  color: #e1e4e8;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+.container { max-width: 1024px; margin: 0 auto; padding: 0 24px; }
+nav {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 20px 0; border-bottom: 1px solid #21262d;
+}
+.logo { font-size: 22px; font-weight: 800; letter-spacing: -0.3px; }
+.logo span { background: linear-gradient(135deg, #58a6ff 0%, #3fb950 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+.nav-links { display: flex; gap: 24px; align-items: center; }
+.nav-links a { color: #8b949e; font-size: 14px; text-decoration: none; transition: color .2s; }
+.nav-links a:hover { color: #f0f6fc; }
+.btn-gh {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 18px; border: 1px solid #30363d; border-radius: 6px;
+  font-size: 13px; font-weight: 600; color: #e1e4e8; text-decoration: none;
+  transition: border-color .2s, background .2s;
+}
+.btn-gh:hover { border-color: #58a6ff; background: #161b22; }
+.btn-primary {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 14px 32px;
+  background: linear-gradient(135deg, #238636, #2ea043);
+  color: #fff; border: none; border-radius: 8px;
+  font-size: 16px; font-weight: 600; cursor: pointer; text-decoration: none;
+  transition: opacity .2s, transform .1s;
+}
+.btn-primary:hover { opacity: .9; }
+.btn-primary:active { transform: scale(.97); }
+.btn-secondary {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 14px 32px;
+  background: #21262d; color: #e1e4e8; border: 1px solid #30363d;
+  border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; text-decoration: none;
+  transition: background .2s;
+}
+.btn-secondary:hover { background: #30363d; }
+.hero {
+  text-align: center; padding: 80px 24px 60px;
+  max-width: 800px; margin: 0 auto;
+}
+.hero h1 {
+  font-size: 48px; font-weight: 800; line-height: 1.15;
+  margin-bottom: 16px; letter-spacing: -0.03em;
+}
+.hero h1 span { background: linear-gradient(135deg, #58a6ff 0%, #3fb950 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+.hero p { font-size: 18px; color: #8b949e; max-width: 600px; margin: 0 auto 40px; line-height: 1.7; }
+.hero-btns { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+.stats-bar {
+  display: flex; justify-content: center; gap: 48px;
+  padding: 32px 24px; margin: 0 auto 60px;
+  max-width: 700px;
+  background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+}
+.stat { text-align: center; }
+.stat .val { font-size: 28px; font-weight: 700; color: #f0f6fc; }
+.stat .lbl { font-size: 12px; color: #484f58; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+.section { margin: 80px 0; }
+.section-title { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 12px; }
+.section-subtitle { font-size: 16px; color: #8b949e; text-align: center; max-width: 500px; margin: 0 auto 40px; }
+.steps { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+.step {
+  background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+  padding: 28px 24px; text-align: center;
+}
+.step .num {
+  width: 36px; height: 36px;
+  background: linear-gradient(135deg, #58a6ff 0%, #3fb950 100%);
+  border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 16px; font-weight: 700; color: #fff; margin: 0 auto 14px;
+}
+.step h3 { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
+.step p { font-size: 14px; color: #8b949e; line-height: 1.6; }
+.feature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.feature-card {
+  background: #161b22; border: 1px solid #30363d; border-radius: 10px;
+  padding: 24px; transition: border-color .2s;
+}
+.feature-card:hover { border-color: #58a6ff; }
+.feature-card h3 { font-size: 15px; margin-bottom: 6px; color: #f0f6fc; display: flex; align-items: center; gap: 8px; }
+.feature-card p { font-size: 13px; color: #8b949e; line-height: 1.6; }
+.feature-card .ic { font-size: 18px; }
+.demo-section {
+  background: linear-gradient(135deg, #161b22 0%, #0d1117 100%);
+  border: 1px solid #30363d; border-radius: 12px;
+  padding: 40px; text-align: center;
+}
+.demo-section h2 { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+.demo-section p { color: #8b949e; margin-bottom: 24px; }
+.demo-stats {
+  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; max-width: 600px; margin: 0 auto;
+}
+.demo-stat {
+  background: #0d1117; border-radius: 8px; padding: 20px;
+  border-top: 3px solid;
+}
+.demo-stat.current { border-top-color: #f0883e; }
+.demo-stat.projected { border-top-color: #58a6ff; }
+.demo-stat.savings { border-top-color: #3fb950; }
+.demo-stat .val { font-size: 32px; font-weight: 800; }
+.demo-stat.current .val { color: #f0883e; }
+.demo-stat.projected .val { color: #58a6ff; }
+.demo-stat.savings .val { color: #3fb950; }
+.demo-stat .lbl { font-size: 12px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
+.demo-note { margin-top: 20px; font-size: 14px; color: #484f58; }
+.demo-note a { color: #58a6ff; }
+.cta-section {
+  text-align: center; padding: 60px 24px;
+  background: linear-gradient(135deg, rgba(88,166,255,0.05) 0%, rgba(63,185,80,0.05) 100%);
+  border: 1px solid #30363d; border-radius: 12px;
+}
+.cta-section h2 { font-size: 28px; font-weight: 700; margin-bottom: 12px; }
+.cta-section p { color: #8b949e; margin-bottom: 28px; max-width: 500px; margin-left: auto; margin-right: auto; }
+.cta-btns { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+footer {
+  text-align: center; padding: 32px 0; margin-top: 60px;
+  border-top: 1px solid #21262d; font-size: 13px; color: #484f58;
+}
+footer a { color: #58a6ff; text-decoration: none; }
+footer a:hover { text-decoration: underline; }
+@media (max-width: 768px) {
+  .hero h1 { font-size: 32px; }
+  .hero p { font-size: 16px; }
+  .steps { grid-template-columns: 1fr; }
+  .feature-grid { grid-template-columns: 1fr; }
+  .stats-bar { gap: 24px; flex-wrap: wrap; }
+  .demo-stats { grid-template-columns: 1fr; }
+  .hero { padding: 48px 16px 40px; }
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+  <nav>
+    <div class="logo"><span>TokenSentinel</span></div>
+    <div class="nav-links">
+      <a href="#how-it-works">How it works</a>
+      <a href="#features">Features</a>
+      <a href="#get-started">Get started</a>
+      <a href="https://github.com/Tejas163/TokenSentinel" class="btn-gh">GitHub</a>
+    </div>
+  </nav>
+
+  <div class="hero">
+    <h1>Find <span>$10k+</span> in LLM savings from your billing CSV</h1>
+    <p>Upload your provider billing data. TokenSentinel analyzes your spend, finds cheaper model equivalents, detects waste, and generates a professional PDF savings report. No signup, no Docker, no cloud — one binary.</p>
+    <div class="hero-btns">
+      <a href="https://github.com/Tejas163/TokenSentinel/releases" class="btn-primary">Download for free</a>
+      <a href="https://github.com/Tejas163/TokenSentinel" class="btn-secondary">View on GitHub</a>
+    </div>
+  </div>
+
+  <div class="stats-bar">
+    <div class="stat"><div class="val">30s</div><div class="lbl">Time to first report</div></div>
+    <div class="stat"><div class="val">20+</div><div class="lbl">Currencies supported</div></div>
+    <div class="stat"><div class="val">0</div><div class="lbl">Infrastructure needed</div></div>
+  </div>
+
+  <div id="how-it-works" class="section">
+    <h2 class="section-title">How it works</h2>
+    <p class="section-subtitle">Three steps from billing data to a prioritized savings plan.</p>
+    <div class="steps">
+      <div class="step">
+        <div class="num">1</div>
+        <h3>Export your billing CSV</h3>
+        <p>Download your monthly billing data from OpenAI, Anthropic, or any LLM provider. Most platforms offer CSV export.</p>
+      </div>
+      <div class="step">
+        <div class="num">2</div>
+        <h3>Run the binary</h3>
+        <p>Download, unzip, and run. Open localhost:8080, drag your CSV onto the upload zone, and click analyze. Takes 30 seconds.</p>
+      </div>
+      <div class="step">
+        <div class="num">3</div>
+        <h3>Get your savings plan</h3>
+        <p>Download a professional PDF report with prioritized recommendations, projected savings, and cost breakdown by model.</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="features" class="section">
+    <h2 class="section-title">What you get</h2>
+    <p class="section-subtitle">A complete cost governance toolkit in one binary.</p>
+    <div class="feature-grid">
+      <div class="feature-card">
+        <h3><span class="ic">&#128200;</span> Cost breakdown</h3>
+        <p>See exactly what you're spending per model and provider. Spot the outliers instantly in a clean table view.</p>
+      </div>
+      <div class="feature-card">
+        <h3><span class="ic">&#128257;</span> Model substitution</h3>
+        <p>Find cheaper equivalent models from any provider. Switch Claude to Gemini, GPT-4 to something leaner — without sacrificing quality.</p>
+      </div>
+      <div class="feature-card">
+        <h3><span class="ic">&#128279;</span> Provider switching</h3>
+        <p>Compare costs across OpenAI, Anthropic, Google, Mistral, and others. See exactly what you'd save by migrating workloads.</p>
+      </div>
+      <div class="feature-card">
+        <h3><span class="ic">&#9888;</span> Anomaly detection</h3>
+        <p>3-sigma analysis flags unusual spend patterns. Catch billing errors, runaway costs, and unexpected usage spikes.</p>
+      </div>
+      <div class="feature-card">
+        <h3><span class="ic">&#128421;</span> GPU infra analysis</h3>
+        <p>Detect underutilized GPU clusters and right-size your infrastructure. Know when to move workloads off dedicated hardware.</p>
+      </div>
+      <div class="feature-card">
+        <h3><span class="ic">&#128196;</span> PDF report</h3>
+        <p>Professional downloadable report with executive summary, prioritized recommendations, projected savings, and full cost breakdown.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2 class="section-title">See it in action</h2>
+    <p class="section-subtitle">Upload a sample CSV and get a real savings report in 30 seconds.</p>
+    <div class="demo-section">
+      <h2>$411/mo &#8594; $80/mo</h2>
+      <p>Real output from the sample billing CSV included with every download.</p>
+      <div class="demo-stats">
+        <div class="demo-stat current">
+          <div class="val">$411</div>
+          <div class="lbl">Current monthly spend</div>
+        </div>
+        <div class="demo-stat projected">
+          <div class="val">$80</div>
+          <div class="lbl">Projected monthly spend</div>
+        </div>
+        <div class="demo-stat savings">
+          <div class="val">$331</div>
+          <div class="lbl">Monthly savings (80.6%)</div>
+        </div>
+      </div>
+      <div class="demo-note">
+        Based on 13 models across OpenAI, Anthropic, Google, and Mistral.
+        <a href="https://github.com/Tejas163/TokenSentinel/blob/master/app/sample-billing.csv">View the sample CSV</a>
+      </div>
+    </div>
+  </div>
+
+  <div id="get-started" class="cta-section">
+    <h2>Start saving in 30 seconds</h2>
+    <p>Download the binary, run it, upload your CSV. No signup, no Docker, no cloud account.</p>
+    <div class="cta-btns">
+      <a href="https://github.com/Tejas163/TokenSentinel/releases" class="btn-primary">Download now</a>
+      <a href="https://github.com/Tejas163/TokenSentinel" class="btn-secondary">GitHub</a>
+    </div>
+  </div>
+
+  <footer>
+    TokenSentinel &middot; Open source LLM cost governance
+    &middot; <a href="https://github.com/Tejas163/TokenSentinel">GitHub</a>
+    &middot; Single binary, zero infrastructure
+    &middot; MIT license
+  </footer>
+</div>
+
+</body>
+</html>
