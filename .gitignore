@@ -30,3 +30,6 @@ evolunet_slm/.pytest_cache/
 # Docker
 *.log
 *.err
+
+# SQLite
+*.db

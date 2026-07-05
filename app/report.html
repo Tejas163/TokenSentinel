@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Assessment Report — TokenSentinel</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #0a0c10;
+  color: #e1e4e8;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+.container { max-width: 900px; margin: 0 auto; padding: 32px 24px 48px; }
+header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #21262d;
+  margin-bottom: 28px;
+}
+.header-left { display: flex; align-items: center; gap: 12px; }
+.logo { font-size: 18px; font-weight: 700; }
+.logo span { background: linear-gradient(135deg, #58a6ff 0%, #3fb950 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+.header-meta { font-size: 12px; color: #484f58; }
+.header-meta span { color: #8b949e; }
+.actions-top { display: flex; gap: 8px; }
+.btn-sm {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 600;
+  text-decoration: none; cursor: pointer; transition: opacity .2s;
+  border: 1px solid #30363d; background: #21262d; color: #e1e4e8;
+}
+.btn-sm:hover { background: #30363d; }
+.btn-sm.primary { background: #238636; border-color: #238636; color: #fff; }
+.btn-sm.primary:hover { opacity: .85; }
+.stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 24px; }
+.stat-card {
+  background: linear-gradient(180deg, #161b22 0%, #0d1117 100%);
+  border: 1px solid #30363d; border-radius: 10px; padding: 20px; text-align: center;
+  position: relative; overflow: hidden;
+}
+.stat-card::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0;
+  height: 3px;
+}
+.stat-card.current::before { background: #f0883e; }
+.stat-card.projected::before { background: #58a6ff; }
+.stat-card.savings::before { background: #3fb950; }
+.stat-card .val { font-size: 28px; font-weight: 700; margin-bottom: 2px; font-variant-numeric: tabular-nums; }
+.stat-card .lbl { font-size: 12px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; }
+.stat-card .pct { font-size: 12px; margin-top: 4px; }
+.stat-card.current .val { color: #f0883e; }
+.stat-card.current .pct { color: #f0883e; }
+.stat-card.projected .val { color: #58a6ff; }
+.stat-card.savings .val { color: #3fb950; }
+.stat-card.savings .pct { color: #3fb950; }
+.savings-rate {
+  text-align: center;
+  padding: 20px;
+  margin-bottom: 28px;
+  background: linear-gradient(135deg, rgba(63,185,80,0.08) 0%, rgba(88,166,255,0.08) 100%);
+  border: 1px solid rgba(63,185,80,0.25);
+  border-radius: 10px;
+}
+.savings-rate .big { font-size: 40px; font-weight: 800; color: #3fb950; letter-spacing: -0.02em; }
+.savings-rate .label { font-size: 13px; color: #8b949e; margin-top: 2px; }
+.section { margin-bottom: 28px; }
+.section-title {
+  font-size: 16px; font-weight: 700; color: #f0f6fc;
+  margin-bottom: 12px;
+  display: flex; align-items: center; gap: 8px;
+}
+.section-title .count {
+  font-size: 11px; font-weight: 600; color: #8b949e;
+  background: #21262d; padding: 2px 8px; border-radius: 10px;
+}
+.rec-card {
+  background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+  padding: 16px 20px; margin-bottom: 8px;
+  transition: border-color .2s;
+}
+.rec-card:hover { border-color: #58a6ff; }
+.rec-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
+.badge {
+  display: inline-block; padding: 2px 10px; border-radius: 12px;
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.badge.high { background: #3d1214; color: #ff7b72; }
+.badge.medium { background: #3d2e00; color: #d29922; }
+.badge.low { background: #0d419d; color: #58a6ff; }
+.rec-category { font-size: 11px; color: #8b949e; text-transform: capitalize; }
+.rec-desc { font-size: 14px; margin-bottom: 4px; color: #f0f6fc; }
+.rec-meta { font-size: 12px; color: #484f58; }
+.rec-savings { font-size: 15px; font-weight: 700; color: #3fb950; margin-left: auto; white-space: nowrap; }
+table { width: 100%; border-collapse: collapse; border-radius: 8px; overflow: hidden; }
+th {
+  text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: #8b949e; padding: 10px 12px; border-bottom: 1px solid #30363d;
+  background: #0d1117;
+}
+td { padding: 10px 12px; border-bottom: 1px solid #21262d; font-size: 13px; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+tr:hover td { background: rgba(88,166,255,0.04); }
+tr.total td {
+  font-weight: 700; border-top: 2px solid #30363d; border-bottom: none;
+  background: #0d1117;
+}
+.actions { display: flex; gap: 10px; justify-content: center; margin-top: 28px; flex-wrap: wrap; }
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 12px 24px; border-radius: 6px; font-size: 14px; font-weight: 600;
+  text-decoration: none; cursor: pointer; transition: opacity .2s, transform .1s;
+}
+.btn:hover { opacity: .85; }
+.btn:active { transform: scale(.97); }
+.btn-primary { background: linear-gradient(135deg, #238636, #2ea043); color: #fff; }
+.btn-secondary { background: #21262d; color: #e1e4e8; border: 1px solid #30363d; }
+.btn-secondary:hover { background: #30363d; opacity: 1; }
+.footer {
+  text-align: center; margin-top: 36px;
+  padding-top: 20px; border-top: 1px solid #21262d;
+  font-size: 13px; color: #484f58;
+}
+.footer a { color: #58a6ff; text-decoration: none; }
+.footer a:hover { text-decoration: underline; }
+@media (max-width: 640px) {
+  .stats { grid-template-columns: 1fr; }
+  .rec-header { flex-direction: column; align-items: flex-start; }
+  .rec-savings { margin-left: 0; }
+  .actions { flex-direction: column; align-items: stretch; }
+  .actions .btn { justify-content: center; }
+  header { flex-direction: column; gap: 12px; }
+  .actions-top { width: 100%; }
+  .actions-top .btn-sm { flex: 1; justify-content: center; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div class="header-left">
+      <div class="logo"><span>TokenSentinel</span></div>
+      <div class="header-meta">
+        Report &middot; <span>{{.Report.Assessment.CreatedAt}}</span>
+        {{if .Report.Assessment.CompanyName}} &middot; {{.Report.Assessment.CompanyName}}{{end}}
+      </div>
+    </div>
+    <div class="actions-top">
+      <a href="/" class="btn-sm">New Analysis</a>
+      <a href="/report/{{.ID}}/pdf" class="btn-sm primary">Download PDF</a>
+    </div>
+  </header>
+
+  <div class="stats">
+    <div class="stat-card current">
+      <div class="val">{{.Report.CurrencySymbol}}{{printf "%.0f" .Report.TotalCurrent}}</div>
+      <div class="lbl">Current Monthly Spend</div>
+    </div>
+    <div class="stat-card projected">
+      <div class="val">{{.Report.CurrencySymbol}}{{printf "%.0f" .Report.TotalProjected}}</div>
+      <div class="lbl">Projected Monthly Spend</div>
+    </div>
+    <div class="stat-card savings">
+      <div class="val">{{.Report.CurrencySymbol}}{{printf "%.0f" .Report.TotalSavings}}</div>
+      <div class="lbl">Monthly Savings</div>
+    </div>
+  </div>
+
+  {{if .Report.TotalCurrent}}
+  <div class="savings-rate">
+    <div class="big">{{printf "%.1f" (mul (div .Report.TotalSavings .Report.TotalCurrent) 100)}}%</div>
+    <div class="label">Potential savings rate</div>
+  </div>
+  {{end}}
+
+  {{if .Report.Recommendations}}
+  <div class="section">
+    <div class="section-title">
+      Recommendations
+      <span class="count">{{len .Report.Recommendations}}</span>
+    </div>
+    {{range .Report.Recommendations}}
+    <div class="rec-card">
+      <div class="rec-header">
+        <span class="badge {{.Priority}}">{{.Priority}}</span>
+        <span class="rec-category">{{.Category | replace "_" " "}}</span>
+        <span class="rec-savings">+{{$.Report.CurrencySymbol}}{{printf "%.0f" .MonthlySavings}}/mo</span>
+      </div>
+      <div class="rec-desc">{{.Description}}</div>
+      <div class="rec-meta">Current: {{$.Report.CurrencySymbol}}{{printf "%.0f" .CurrentCost}}/mo &middot; Payback: {{.PaybackPeriodDays}} days</div>
+    </div>
+    {{end}}
+  </div>
+  {{end}}
+
+  {{if .Report.CostBreakdown}}
+  <div class="section">
+    <div class="section-title">Cost Breakdown by Model</div>
+    <table>
+      <thead>
+        <tr>
+          <th>Model</th>
+          <th>Provider</th>
+          <th class="num">Input (M)</th>
+          <th class="num">Output (M)</th>
+          <th class="num">Current/mo</th>
+          <th class="num">Projected/mo</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Report.CostBreakdown}}
+        <tr>
+          <td>{{.Model}}</td>
+          <td>{{.Provider}}</td>
+          <td class="num">{{printf "%.2f" .InputTokensMillions}}</td>
+          <td class="num">{{printf "%.2f" .OutputTokensMillions}}</td>
+          <td class="num">{{$.Report.CurrencySymbol}}{{printf "%.0f" .CurrentMonthlyCost}}</td>
+          <td class="num">{{$.Report.CurrencySymbol}}{{printf "%.0f" .ProjectedMonthlyCost}}</td>
+        </tr>
+        {{end}}
+        <tr class="total">
+          <td colspan="4">Total</td>
+          <td class="num">{{$.Report.CurrencySymbol}}{{printf "%.0f" $.Report.TotalCurrent}}</td>
+          <td class="num">{{$.Report.CurrencySymbol}}{{printf "%.0f" $.Report.TotalProjected}}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  {{end}}
+
+  <div class="actions">
+    <a href="/report/{{.ID}}/pdf" class="btn btn-primary">Download PDF Report</a>
+    <a href="/" class="btn btn-secondary">Analyze Another CSV</a>
+  </div>
+
+  <div class="footer">
+    TokenSentinel &middot; Open source LLM cost governance
+    &middot; <a href="https://github.com/Tejas163/TokenSentinel">GitHub</a>
+  </div>
+</div>
+</body>
+</html>

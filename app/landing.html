@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TokenSentinel — LLM Cost Optimizer</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #0a0c10;
+  color: #e1e4e8;
+  min-height: 100vh;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+.container { max-width: 780px; margin: 0 auto; padding: 32px 24px 48px; }
+header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 40px;
+}
+.logo { font-size: 20px; font-weight: 700; letter-spacing: -0.3px; color: #f0f6fc; }
+.logo span { background: linear-gradient(135deg, #58a6ff 0%, #3fb950 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+.header-links { display: flex; gap: 16px; align-items: center; }
+.header-links a { color: #8b949e; font-size: 13px; text-decoration: none; transition: color .2s; }
+.header-links a:hover { color: #f0f6fc; }
+.btn-gh { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border: 1px solid #30363d; border-radius: 6px; font-size: 13px; color: #e1e4e8; text-decoration: none; transition: border-color .2s; }
+.btn-gh:hover { border-color: #58a6ff; }
+.hero {
+  text-align: center;
+  padding: 48px 24px 40px;
+  margin-bottom: 32px;
+}
+.hero h1 { font-size: 36px; font-weight: 800; line-height: 1.25; margin-bottom: 12px; letter-spacing: -0.02em; }
+.hero h1 span { background: linear-gradient(135deg, #58a6ff 0%, #3fb950 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+.hero p { font-size: 16px; color: #8b949e; max-width: 560px; margin: 0 auto 32px; line-height: 1.6; }
+.hero-stats { display: flex; gap: 32px; justify-content: center; margin-bottom: 36px; }
+.hero-stat { text-align: center; }
+.hero-stat .val { font-size: 24px; font-weight: 700; color: #f0f6fc; }
+.hero-stat .lbl { font-size: 12px; color: #484f58; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+.tabs {
+  display: flex; gap: 0;
+  border-bottom: 1px solid #30363d;
+  margin-bottom: 0;
+}
+.tab {
+  flex: 1;
+  padding: 14px 16px;
+  text-align: center;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: #8b949e;
+  border-bottom: 2px solid transparent;
+  transition: color .2s, border-color .2s;
+  background: none;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  font-family: inherit;
+  user-select: none;
+}
+.tab:hover { color: #e1e4e8; }
+.tab.active { color: #58a6ff; border-bottom-color: #58a6ff; }
+.tab-pane { display: none; }
+.tab-pane.active { display: block; }
+.pane-body {
+  padding: 32px 24px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-top: none;
+  border-radius: 0 0 10px 10px;
+}
+.upload-zone {
+  border: 2px dashed #30363d;
+  border-radius: 8px;
+  padding: 44px 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .2s, background .2s;
+  background: #0d1117;
+}
+.upload-zone:hover { border-color: #58a6ff; background: #0d1117; }
+.upload-zone.dragover { border-color: #3fb950; background: #0d1117; }
+.upload-zone input[type="file"] { display: none; }
+.upload-zone .icon { font-size: 40px; margin-bottom: 10px; line-height: 1; }
+.upload-zone .label { font-size: 16px; font-weight: 600; }
+.upload-zone .hint { font-size: 13px; color: #8b949e; margin-top: 6px; }
+.form-group { margin-bottom: 16px; }
+.form-group label { display: block; font-size: 13px; font-weight: 600; color: #8b949e; margin-bottom: 6px; }
+.form-group select, .form-group input {
+  width: 100%;
+  padding: 10px 14px;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #e1e4e8;
+  font-size: 14px;
+  font-family: inherit;
+  transition: border-color .2s;
+}
+.form-group select:focus, .form-group input:focus {
+  outline: none;
+  border-color: #58a6ff;
+}
+.form-group select option { background: #161b22; }
+.form-hint { font-size: 12px; color: #484f58; margin-top: 4px; }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 12px 32px;
+  background: linear-gradient(135deg, #238636, #2ea043);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity .2s, transform .1s;
+  width: 100%;
+  margin-top: 8px;
+}
+.btn:hover { opacity: .9; }
+.btn:active { transform: scale(.98); }
+.btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+.spinner { display: none; vertical-align: middle; }
+.spinner.active { display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner::after {
+  content: '';
+  display: inline-block;
+  width: 14px; height: 14px;
+  border: 2px solid #fff;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin .6s linear infinite;
+  vertical-align: middle;
+}
+.cols-hint { font-size: 12px; color: #484f58; margin-top: 8px; }
+.cols-hint code { background: #0d1117; padding: 1px 6px; border-radius: 3px; font-size: 11px; color: #8b949e; }
+.cols-hint a { color: #58a6ff; }
+.how-it-works { margin: 48px 0; }
+.how-it-works h2 { font-size: 20px; font-weight: 700; text-align: center; margin-bottom: 28px; }
+.steps { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+.step {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  padding: 24px;
+  text-align: center;
+  position: relative;
+}
+.step .num {
+  width: 32px; height: 32px;
+  background: linear-gradient(135deg, #58a6ff 0%, #3fb950 100%);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 700; color: #fff;
+  margin: 0 auto 12px;
+}
+.step h3 { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+.step p { font-size: 13px; color: #8b949e; line-height: 1.5; }
+.features { margin: 48px 0; }
+.features h2 { font-size: 20px; font-weight: 700; text-align: center; margin-bottom: 20px; }
+.feature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.feature-card {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 16px;
+  transition: border-color .2s;
+}
+.feature-card:hover { border-color: #58a6ff; }
+.feature-card h3 { font-size: 13px; margin-bottom: 4px; color: #f0f6fc; display: flex; align-items: center; gap: 6px; }
+.feature-card p { font-size: 12px; color: #8b949e; line-height: 1.5; }
+.feature-card .ic { font-size: 16px; }
+.footer { text-align: center; margin-top: 48px; padding-top: 24px; border-top: 1px solid #21262d; font-size: 13px; color: #484f58; }
+.footer a { color: #58a6ff; text-decoration: none; }
+.footer a:hover { text-decoration: underline; }
+.error { display: none; background: #3d1214; border: 1px solid #da3633; border-radius: 6px; padding: 10px 14px; margin-bottom: 12px; font-size: 13px; }
+.error.show { display: block; }
+.error-close { float: right; cursor: pointer; color: #da3633; font-weight: 700; }
+.success { display: none; background: #0d3d1a; border: 1px solid #3fb950; border-radius: 6px; padding: 10px 14px; margin-bottom: 12px; font-size: 13px; }
+.success.show { display: block; }
+.filename { font-size: 13px; color: #8b949e; margin-top: 8px; display: none; }
+.filename.show { display: block; }
+@media (max-width: 640px) {
+  .hero h1 { font-size: 26px; }
+  .steps { grid-template-columns: 1fr; }
+  .feature-grid { grid-template-columns: 1fr; }
+  .hero-stats { gap: 20px; }
+  .hero-stat .val { font-size: 20px; }
+  .pane-body { padding: 20px 16px; }
+  .hero { padding: 32px 16px 28px; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div class="logo"><span>TokenSentinel</span></div>
+    <div class="header-links">
+      <a href="https://github.com/Tejas163/TokenSentinel">GitHub</a>
+    </div>
+  </header>
+
+  <div class="hero">
+    <h1>Find <span>$10k+</span> in LLM savings from your billing CSV</h1>
+    <p>Upload your provider billing data. TokenSentinel analyzes your spend, finds cheaper model equivalents, detects waste, and generates a professional PDF savings report. No signup, no Docker, instant.</p>
+
+    <div class="hero-stats">
+      <div class="hero-stat">
+        <div class="val">30s</div>
+        <div class="lbl">Time to first report</div>
+      </div>
+      <div class="hero-stat">
+        <div class="val">20+</div>
+        <div class="lbl">Currencies supported</div>
+      </div>
+      <div class="hero-stat">
+        <div class="val">0</div>
+        <div class="lbl">Infrastructure needed</div>
+      </div>
+    </div>
+
+    <div id="error" class="error"><span id="errorText"></span><span class="error-close" onclick="closeError()">&times;</span></div>
+    <div id="success" class="success"><span id="successText"></span></div>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="csv" onclick="switchTab('csv')">Upload CSV</button>
+      <button class="tab" data-tab="api" onclick="switchTab('api')">API Key Import</button>
+    </div>
+
+    <div class="tab-pane active" id="tab-csv">
+      <div class="pane-body">
+        <form id="uploadForm" action="/analyze" method="POST" enctype="multipart/form-data">
+          <div class="upload-zone" id="dropZone">
+            <div class="icon">&#128196;</div>
+            <div class="label">Drop your billing CSV here</div>
+            <div class="hint">OpenAI, Anthropic, or standard billing CSVs</div>
+            <input type="file" name="file" id="fileInput" accept=".csv">
+          </div>
+          <div class="filename" id="fileName"></div>
+          <div class="cols-hint">
+            Auto-detects columns: <code>model</code>, <code>input_tokens</code>, <code>output_tokens</code>, <code>cost</code>
+            &middot; <a href="/sample-billing.csv">Download sample</a>
+          </div>
+          <button type="submit" class="btn" id="submitBtn">
+            <span class="spinner" id="csvSpinner"></span>
+            <span id="csvBtnText">Analyze My Spend</span>
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <div class="tab-pane" id="tab-api">
+      <div class="pane-body">
+        <form id="apiForm">
+          <div class="form-group">
+            <label for="provider">Provider</label>
+            <select id="provider" name="provider">
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="apiKey">API Key</label>
+            <input type="password" id="apiKey" name="api_key" placeholder="sk-... or your API key" autocomplete="off">
+            <div class="form-hint">Read-only usage &mdash; we never store your key</div>
+          </div>
+          <div class="form-group" id="orgIdGroup" style="display:none;">
+            <label for="orgId">Organization ID <span style="color:#484f58;">(optional)</span></label>
+            <input type="text" id="orgId" name="org_id" placeholder="org_...">
+            <div class="form-hint">Required if using an org-level API key</div>
+          </div>
+          <button type="submit" class="btn" id="apiSubmitBtn">
+            <span class="spinner" id="apiSpinner"></span>
+            <span id="apiBtnText">Import &amp; Analyze</span>
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="how-it-works">
+    <h2>How it works</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="num">1</div>
+        <h3>Export billing data</h3>
+        <p>Download your monthly billing CSV from OpenAI, Anthropic, or any LLM provider.</p>
+      </div>
+      <div class="step">
+        <div class="num">2</div>
+        <h3>Upload and analyze</h3>
+        <p>Drop the CSV here. TokenSentinel parses it and runs the prescriptive savings engine.</p>
+      </div>
+      <div class="step">
+        <div class="num">3</div>
+        <h3>Get your savings plan</h3>
+        <p>Download a professional PDF report with prioritized recommendations and projected savings.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="features">
+    <h2>What you get</h2>
+    <div class="feature-grid">
+      <div class="feature-card">
+        <h3><span class="ic">&#128200;</span> Cost breakdown</h3>
+        <p>See exactly what you're spending per model and provider. Spot the outliers instantly.</p>
+      </div>
+      <div class="feature-card">
+        <h3><span class="ic">&#128257;</span> Model substitution</h3>
+        <p>Find cheaper equivalent models from any provider without sacrificing quality.</p>
+      </div>
+      <div class="feature-card">
+        <h3><span class="ic">&#128279;</span> Provider switching</h3>
+        <p>Compare cloud vs self-hosted costs. See what you'd save by migrating workloads.</p>
+      </div>
+      <div class="feature-card">
+        <h3><span class="ic">&#9888;</span> Anomaly detection</h3>
+        <p>3-sigma analysis flags unusual spend patterns. Catch billing errors and runaway costs.</p>
+      </div>
+      <div class="feature-card">
+        <h3><span class="ic">&#128421;</span> GPU infra analysis</h3>
+        <p>Detect underutilized GPU clusters and right-size your infrastructure.</p>
+      </div>
+      <div class="feature-card">
+        <h3><span class="ic">&#128196;</span> PDF report</h3>
+        <p>Professional downloadable report with executive summary and prioritized recommendations.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    TokenSentinel &middot; Open source LLM cost governance
+    &middot; <a href="https://github.com/Tejas163/TokenSentinel">GitHub</a>
+    &middot; Single binary, zero infrastructure
+  </div>
+</div>
+
+<script>
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+const fileName = document.getElementById('fileName');
+const form = document.getElementById('uploadForm');
+const submitBtn = document.getElementById('submitBtn');
+const csvSpinner = document.getElementById('csvSpinner');
+const csvBtnText = document.getElementById('csvBtnText');
+const errorEl = document.getElementById('error');
+const errorText = document.getElementById('errorText');
+const successEl = document.getElementById('success');
+const successText = document.getElementById('successText');
+const providerSelect = document.getElementById('provider');
+const orgIdGroup = document.getElementById('orgIdGroup');
+
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', (e) => { e.preventDefault(); dropZone.classList.remove('dragover'); fileInput.files = e.dataTransfer.files; updateFileName(); });
+fileInput.addEventListener('change', () => { hideError(); updateFileName(); });
+
+function updateFileName() {
+  if (fileInput.files.length) {
+    fileName.textContent = fileInput.files[0].name;
+    fileName.classList.add('show');
+  } else {
+    fileName.classList.remove('show');
+  }
+}
+
+form.addEventListener('submit', (e) => {
+  if (!fileInput.files.length) {
+    e.preventDefault();
+    showError('Please select a CSV file to upload.');
+    return;
+  }
+  submitBtn.disabled = true;
+  csvSpinner.classList.add('active');
+  csvBtnText.textContent = 'Analyzing...';
+});
+
+providerSelect.addEventListener('change', () => {
+  orgIdGroup.style.display = providerSelect.value === 'anthropic' ? 'block' : 'none';
+});
+
+document.getElementById('apiForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  hideError();
+  hideSuccess();
+
+  const apiKey = document.getElementById('apiKey').value.trim();
+  if (!apiKey) {
+    showError('Please enter an API key.');
+    return;
+  }
+
+  const apiSubmitBtn = document.getElementById('apiSubmitBtn');
+  const apiSpinner = document.getElementById('apiSpinner');
+  const apiBtnText = document.getElementById('apiBtnText');
+  apiSubmitBtn.disabled = true;
+  apiSpinner.classList.add('active');
+  apiBtnText.textContent = 'Importing...';
+
+  try {
+    const body = {
+      provider: providerSelect.value,
+      api_key: apiKey,
+    };
+    const orgId = document.getElementById('orgId').value.trim();
+    if (orgId) {
+      body.org_id = orgId;
+    }
+
+    const resp = await fetch('/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    const data = await resp.json();
+
+    if (!resp.ok) {
+      throw new Error(data.error || data.message || 'Import failed');
+    }
+
+    if (data.redirect_url) {
+      window.location.href = data.redirect_url;
+    }
+  } catch (err) {
+    apiSubmitBtn.disabled = false;
+    apiSpinner.classList.remove('active');
+    apiBtnText.textContent = 'Import &amp; Analyze';
+    showError(err.message || 'Import failed. Check your API key and try again.');
+  }
+});
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  document.querySelector(`.tab[data-tab="${name}"]`).classList.add('active');
+  document.getElementById(`tab-${name}`).classList.add('active');
+  hideError();
+  hideSuccess();
+}
+
+function showError(msg) { errorText.textContent = msg; errorEl.classList.add('show'); }
+function hideError() { errorEl.classList.remove('show'); }
+function closeError() { hideError(); }
+function showSuccess(msg) { successText.textContent = msg; successEl.classList.add('show'); }
+function hideSuccess() { successEl.classList.remove('show'); }
+</script>
+</body>
+</html>

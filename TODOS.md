@@ -1,5 +1,9 @@
 # TODOS
 
+## Phase 0: Product
+
+- [x] **Single Go binary** — `app/` is the entire product. CSV upload → prescriptive analysis → PDF report. Zero infra dependencies.
+
 ## Phase 1: Polish & Test Coverage (high value, low effort)
 
 - [x] **Cost dashboard structured logging** — replace log.Printf with slog
