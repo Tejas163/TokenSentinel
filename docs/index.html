@@ -72,9 +72,52 @@ nav {
 .section-title { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 12px; }
 .section-subtitle { font-size: 16px; color: #8b949e; text-align: center; max-width: 500px; margin: 0 auto 40px; }
 .demo-section { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 40px; }
-.demo-gif-wrapper { max-width: 720px; margin: 0 auto; border-radius: 8px; overflow: hidden; border: 1px solid #30363d; }
-.demo-gif { width: 100%; height: auto; display: block; }
-@media (max-width: 768px) { .demo-section { padding: 24px 16px; } }
+@media (max-width: 768px) { .demo-section { padding: 24px 12px; } }
+.demo-flow {
+  display: flex; align-items: flex-start; justify-content: center; gap: 0;
+  max-width: 860px; margin: 0 auto;
+}
+.demo-frame { flex: 1; min-width: 0; text-align: center; }
+.frame-badge {
+  width: 28px; height: 28px; margin: 0 auto 8px;
+  background: linear-gradient(135deg, #58a6ff 0%, #3fb950 100%);
+  border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 700; color: #fff;
+}
+.frame-body {
+  background: #0d1117; border: 1px solid #30363d; border-radius: 8px;
+  padding: 16px; min-height: 180px;
+  display: flex; align-items: center; justify-content: center;
+}
+.frame-caption { font-size: 12px; color: #8b949e; margin-top: 8px; }
+.demo-arrow { font-size: 20px; color: #30363d; padding: 40px 8px 0; flex-shrink: 0; }
+.upload-mock { text-align: center; padding: 8px; }
+.upload-mock .mock-icon { font-size: 32px; line-height: 1; margin-bottom: 6px; }
+.upload-mock .mock-label { font-size: 13px; font-weight: 600; color: #e1e4e8; }
+.upload-mock .mock-hint { font-size: 11px; color: #484f58; margin-top: 4px; }
+.report-mock { flex-direction: column; gap: 6px; align-items: stretch !important; text-align: left; }
+.mock-row { display: flex; justify-content: space-between; font-size: 11px; padding: 2px 0; }
+.mock-row .mock-label { color: #8b949e; }
+.mock-row .mock-val { color: #e1e4e8; font-weight: 600; }
+.mock-row .mock-val.green { color: #3fb950; }
+.mock-bar { height: 18px; background: #1c2128; border-radius: 4px; margin: 2px 0; overflow: hidden; font-size: 9px; }
+.mock-bar-fill { height: 100%; background: #2ea043; border-radius: 4px; display: flex; align-items: center; padding: 0 6px; color: #fff; white-space: nowrap; overflow: hidden; }
+.mock-bar-fill.high { background: #d29922; }
+.mock-table { font-size: 10px; margin-top: 6px; }
+.mock-th, .mock-td { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid #21262d; }
+.mock-th { color: #484f58; font-weight: 600; }
+.mock-td { color: #e1e4e8; }
+.mock-td .green { color: #3fb950; font-weight: 600; }
+.pdf-mock { text-align: center; padding: 8px; }
+.pdf-mock .pdf-icon { font-size: 36px; line-height: 1; margin-bottom: 6px; }
+.pdf-mock .pdf-label { font-size: 11px; color: #8b949e; word-break: break-all; margin-bottom: 10px; }
+.pdf-mock .pdf-btn { display: inline-block; padding: 8px 20px; background: linear-gradient(135deg, #238636, #2ea043); border-radius: 6px; font-size: 13px; font-weight: 600; color: #fff; }
+@media (max-width: 700px) {
+  .demo-flow { flex-direction: column; align-items: center; }
+  .demo-arrow { transform: rotate(90deg); padding: 4px 0; }
+  .demo-frame { width: 100%; max-width: 360px; }
+  .frame-body { min-height: 140px; }
+}
 .demo-results {
   display: flex; align-items: center; justify-content: center; gap: 20px;
   max-width: 600px; margin: 24px auto 0; padding: 20px 24px;
@@ -192,8 +235,48 @@ footer a:hover { text-decoration: underline; }
   <div class="section demo-section">
     <h2 class="section-title">See it in action</h2>
     <p class="section-subtitle">Upload your billing CSV, get a prioritized savings report in 30 seconds.</p>
-    <div class="demo-gif-wrapper">
-      <img src="ph-demo.gif" alt="TokenSentinel demo: upload CSV, see analysis, download PDF report" class="demo-gif" loading="lazy">
+    <div class="demo-flow">
+      <div class="demo-frame">
+        <div class="frame-badge">1</div>
+        <div class="frame-body">
+          <div class="upload-mock">
+            <div class="mock-icon">&#128196;</div>
+            <div class="mock-label">Drop your billing CSV here</div>
+            <div class="mock-hint">OpenAI, Anthropic, or standard billing CSVs</div>
+          </div>
+        </div>
+        <div class="frame-caption">Upload your provider billing CSV</div>
+      </div>
+      <div class="demo-arrow">&#10132;</div>
+      <div class="demo-frame">
+        <div class="frame-badge">2</div>
+        <div class="frame-body report-mock">
+          <div class="mock-row"><span class="mock-label">Total savings:</span><span class="mock-val green">$331/mo (80.6%)</span></div>
+          <div class="mock-row"><span class="mock-label">Recommendations:</span><span class="mock-val">4 found</span></div>
+          <div class="mock-bar">
+            <div class="mock-bar-fill" style="width:80%">&#11088; Switch Claude 3.5 Sonnet to Gemini 1.5 Pro</div>
+          </div>
+          <div class="mock-bar" style="background:#21262d;"><div class="mock-bar-fill high" style="width:60%">&#11088; Use GPT-4o mini for classification tasks</div></div>
+          <div class="mock-table">
+            <div class="mock-th"><span>Model</span><span>Current</span><span>Projected</span></div>
+            <div class="mock-td"><span>Claude 3.5 Sonnet</span><span>$180</span><span class="green">$36</span></div>
+            <div class="mock-td"><span>GPT-4 Turbo</span><span>$120</span><span class="green">$24</span></div>
+          </div>
+        </div>
+        <div class="frame-caption">Instant analysis and savings breakdown</div>
+      </div>
+      <div class="demo-arrow">&#10132;</div>
+      <div class="demo-frame">
+        <div class="frame-badge">3</div>
+        <div class="frame-body">
+          <div class="pdf-mock">
+            <div class="pdf-icon">&#128196;</div>
+            <div class="pdf-label">TokenSentinel_Prescriptive_Assessment.pdf</div>
+            <div class="pdf-btn">Download Report</div>
+          </div>
+        </div>
+        <div class="frame-caption">Download your prioritized PDF report</div>
+      </div>
     </div>
   </div>
 
